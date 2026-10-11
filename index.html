@@ -914,8 +914,12 @@ function showInstall(){
   if(standalone||closed) return;
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
   if(deferredPrompt){ $("#installBtn").hidden=false; $("#installTxt").textContent="אפשר להתקין את מסלול שליח כאפליקציה על המסך הראשי."; $("#installBanner").hidden=false; }
-  else if(ios){ $("#installTxt").textContent="להתקנה כאפליקציה: לחץ על כפתור השיתוף (ריבוע עם חץ) ← \"הוספה למסך הבית\"."; $("#installBanner").hidden=false; }
+  else if(ios){ $("#installBtn").hidden=true; $("#installTxt").textContent=IOS_HOWTO; $("#installBanner").hidden=false; }
 }
+const IOS_HOWTO="להתקנה כאפליקציה: לחץ על כפתור השיתוף (ריבוע עם חץ) ← \"הוספה למסך הבית\".";
+const ANDROID_HOWTO="להתקנה: פתח את תפריט הדפדפן (⋮ למעלה) ← \"התקנת אפליקציה\" או \"הוספה למסך הבית\".";
+function installHowto(){ const ios=/iphone|ipad|ipod/i.test(navigator.userAgent); $("#installBtn").hidden=true; $("#installTxt").textContent=ios?IOS_HOWTO:ANDROID_HOWTO; $("#installBanner").hidden=false; }
+addEventListener("appinstalled",()=>{ deferredPrompt=null; $("#installBanner").hidden=true; });
 
 /* ---------- ordering ---------- */
 function cityOf(st){ const f=full(st); const parts=f.split(","); if(parts.length>1) return parts[parts.length-1].trim(); const m=f.match(/\d+[א-ת]?\s+(.+)$/); return m?m[1].trim():""; }
@@ -1187,7 +1191,16 @@ $("#departAt").addEventListener("change",e=>{state.departAt=e.target.value||"";s
 $("#courierName").addEventListener("change",e=>{state.courier=e.target.value.trim();save();});
 $("#mapBtn").addEventListener("click",()=>{ const b=$("#mapBox"); b.hidden=!b.hidden; $("#mapBtn").textContent=b.hidden?"מפה":"סגור מפה"; if(!b.hidden) drawMap(false); });
 $("#splitBtn").addEventListener("click",splitCrew);
-$("#installBtn").addEventListener("click",async()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt=null; $("#installBanner").hidden=true; });
+$("#installBtn").addEventListener("click",async()=>{
+  const ev=deferredPrompt; deferredPrompt=null;
+  if(!ev){ installHowto(); return; }               // the browser's install prompt is no longer available -> show manual steps
+  try{
+    await ev.prompt();
+    const ch=await ev.userChoice;
+    if(ch&&ch.outcome==="accepted"){ $("#installBanner").hidden=true; return; }
+    installHowto();                                 // dismissed -> leave manual steps on screen
+  }catch(e){ installHowto(); }                      // prompt refused (already used / blocked) -> manual steps
+});
 $("#installClose").addEventListener("click",()=>{ $("#installBanner").hidden=true; try{ localStorage.setItem("courier-install-closed","1"); }catch(e){} });
 $("#trackHint").textContent=TRACK.url?"כל לחיצה על 'נמסר' או 'לא נמסר' נרשמת בגיליון המעקב של המנהל.":"";
 $("#orderGeo").addEventListener("click",orderGeo);
