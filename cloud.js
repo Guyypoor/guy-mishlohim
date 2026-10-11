@@ -1,7 +1,7 @@
 /* מסלול שליח – חיבור לשרת (Supabase). המפתח כאן הוא המפתח הציבורי בלבד; ההרשאות נאכפות בשרת (RLS). */
 window.CLOUD_CFG = {
-  url: "",      // https://xxxx.supabase.co
-  anonKey: ""   // public anon key
+  url: "https://rtoukdganvoypamxjgwb.supabase.co",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0b3VrZGdhbnZveXBhbXhqZ3diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NzU5NTksImV4cCI6MjEwNzI1MTk1OX0.RSxoPyIPf_KPvwe9rVa2rNsZoSUe5lDxEQmzh14mIFw"   // public anon key (safe in the browser; access is enforced by RLS)
 };
 window.Cloud = (function(){
   const cfg = window.CLOUD_CFG;
