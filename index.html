@@ -183,7 +183,7 @@ input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(
     <div class="panel">
       <div class="tabs" role="tablist">
         <button class="tab" role="tab" id="tab-wa" aria-controls="pane-wa" aria-selected="true" type="button">מוואטסאפ</button>
-        <button class="tab" role="tab" id="tab-img" aria-controls="pane-img" aria-selected="false" type="button">מצילום מסך</button>
+        <button class="tab" role="tab" id="tab-img" aria-controls="pane-img" aria-selected="false" type="button">מצילום</button>
         <button class="tab" role="tab" id="tab-xl" aria-controls="pane-xl" aria-selected="false" type="button">מאקסל</button>
         <button class="tab" role="tab" id="tab-man" aria-controls="pane-man" aria-selected="false" type="button">ידני</button>
       </div>
@@ -201,8 +201,13 @@ input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(
       </div>
 
       <div id="pane-img" role="tabpanel" aria-labelledby="tab-img" hidden>
-        <label class="f" for="imgFile">צילום מסך של הזמנה, רשימה או הודעה. אפשר כמה תמונות ביחד.
-          <input type="file" id="imgFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+        <div class="actions" style="margin-top:0">
+          <button class="btn amber" id="camBtn" type="button">📷 צלם מסמך עם כתובות</button>
+        </div>
+        <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
+        <p class="hint" style="margin:6px 0 10px">מצלמים דף, תעודת משלוח או רשימה מודפסת. אפשר לצלם כמה דפים ברצף – כל צילום מתווסף.</p>
+        <label class="f" for="imgFile">או בחר צילום מסך / תמונה מהגלריה (הזמנה, רשימה או הודעה). אפשר כמה תמונות ביחד.
+          <input type="file" id="imgFile" accept="image/*" multiple>
         </label>
         <div id="imgThumbs" class="thumbs" hidden></div>
         <div class="actions">
@@ -970,14 +975,14 @@ async function aiParse(){
 let imgFiles=[], imgItems=[], imgOk=false;
 function onImages(files){
   imgFiles=[...files].slice(0,10); const t=$("#imgThumbs"); t.innerHTML="";
-  imgFiles.forEach(f=>{ const u=URL.createObjectURL(f); t.append(el("img",{src:u,alt:"צילום מסך "+f.name})); });
+  imgFiles.forEach(f=>{ const u=URL.createObjectURL(f); t.append(el("img",{src:u,alt:"תמונה "+(f.name||"")})); });
   t.hidden=!imgFiles.length; $("#imgParse").disabled=!imgFiles.length; $("#imgAi").disabled=!imgFiles.length||!imgOk;
   $("#imgPreview").hidden=true; $("#imgAddRow").hidden=true;
 }
 async function imgParseAi(){
   if(!imgFiles.length||!sample) return;
   const b=$("#imgAi"); b.disabled=true; const p=$("#imgPreview"); p.hidden=false; p.textContent="קורא את התמונה...";
-  const prompt="בתמונות יש צילומי מסך (וואטסאפ, אפליקציית הזמנות, רשימה או טבלה) עם כתובות משלוח בישראל, בעיקר בעברית. "
+  const prompt="בתמונות יש צילומי מסך או צילומים של מסמכים מודפסים/כתובים ביד (וואטסאפ, אפליקציית הזמנות, תעודת משלוח, רשימה או טבלה) עם כתובות משלוח בישראל, בעיקר בעברית. "
    +"חלץ כל משלוח: addr (רחוב ומספר בית בדיוק כפי שכתוב), city (עיר אם כתובה), name, phone, note (קומה/דירה/קוד/הערה). "
    +"אל תמציא ואל תשלים פרטים שלא כתובים בתמונה. דלג על טקסט שאינו כתובת משלוח.\n"
    +'החזר JSON בלבד: [{"addr":"","city":"","name":"","phone":"","note":""}]';
@@ -1010,6 +1015,25 @@ async function getOcr(onProg){
   });
   return ocrWorker;
 }
+/* camera photos: shrink, grayscale and stretch contrast so the OCR reads paper documents better */
+async function prepImg(file){
+  try{
+    const bmp=await createImageBitmap(file,{imageOrientation:"from-image"});
+    const k=Math.min(1,2200/Math.max(bmp.width,bmp.height));
+    const w=Math.round(bmp.width*k), h=Math.round(bmp.height*k);
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d",{willReadFrequently:true}); x.drawImage(bmp,0,0,w,h); bmp.close&&bmp.close();
+    const im=x.getImageData(0,0,w,h), d=im.data, hist=new Uint32Array(256);
+    for(let i=0;i<d.length;i+=4){ const g=(d[i]*299+d[i+1]*587+d[i+2]*114)/1000|0; d[i]=g; hist[g]++; }
+    const n=w*h; let lo=0,hi=255,acc=0;
+    for(;lo<255;lo++){ acc+=hist[lo]; if(acc>n*0.01) break; }
+    acc=0; for(;hi>0;hi--){ acc+=hist[hi]; if(acc>n*0.01) break; }
+    if(hi-lo<32){ lo=0; hi=255; }
+    const span=Math.max(1,hi-lo);
+    for(let i=0;i<d.length;i+=4){ const v=Math.max(0,Math.min(255,(d[i]-lo)*255/span)); d[i]=d[i+1]=d[i+2]=v; }
+    x.putImageData(im,0,0); return c;
+  }catch(e){ return file; }
+}
 async function imgParse(){
   if(!imgFiles.length) return;
   const b=$("#imgParse"); b.disabled=true; const p=$("#imgPreview"); p.hidden=false; $("#imgAddRow").hidden=true;
@@ -1019,7 +1043,7 @@ async function imgParse(){
     p.textContent="מכין קורא טקסט…";
     const w=await getOcr(prog);
     let text="";
-    for(cur=0;cur<imgFiles.length;cur++){ const r=await w.recognize(imgFiles[cur]); text+="\n"+(r&&r.data&&r.data.text||""); }
+    for(cur=0;cur<imgFiles.length;cur++){ const r=await w.recognize(await prepImg(imgFiles[cur])); text+="\n"+(r&&r.data&&r.data.text||""); }
     showImgItems(parseWhatsApp(text)," מהתמונה");
   }catch(e){
     ocrWorker=null;
@@ -1145,6 +1169,8 @@ $("#waParse").addEventListener("click",()=>showWaPreview(parseWhatsApp($("#waTex
 $("#waAdd").addEventListener("click",()=>{ addStops(waItems); $("#waText").value=""; $("#waPreview").hidden=true; $("#waAddRow").hidden=true; });
 $("#waAi").addEventListener("click",aiParse);
 $("#imgFile").addEventListener("change",e=>onImages(e.target.files));
+$("#camBtn").addEventListener("click",()=>$("#camFile").click());
+$("#camFile").addEventListener("change",e=>{ const f=[...e.target.files]; e.target.value=""; if(f.length){ onImages([...imgFiles,...f]); setStatus(imgFiles.length>1?("צולמו "+imgFiles.length+" דפים. אפשר לצלם עוד או ללחוץ 'קרא כתובות מהתמונה'."):"הצילום נוסף. אפשר לצלם עוד דף או ללחוץ 'קרא כתובות מהתמונה'."); } });
 $("#imgParse").addEventListener("click",imgParse);
 $("#imgAi").addEventListener("click",imgParseAi);
 $("#imgAdd").addEventListener("click",()=>{ addStops(imgItems); imgItems=[]; $("#imgFile").value=""; onImages([]); });
