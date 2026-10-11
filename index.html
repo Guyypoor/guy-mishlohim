@@ -907,18 +907,21 @@ addEventListener("hashchange",importFromHash);
 
 /* ---------- install as an app ---------- */
 let deferredPrompt=null;
-addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); deferredPrompt=e; showInstall(); });
+const IS_IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+function isInstalled(){ return !!(navigator.standalone||matchMedia("(display-mode: standalone)").matches||matchMedia("(display-mode: fullscreen)").matches||matchMedia("(display-mode: minimal-ui)").matches); }
+addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); if(IS_IOS||isInstalled()) return; deferredPrompt=e; showInstall(); });
 function showInstall(){
-  const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  const standalone=isInstalled();
+  if(standalone){ $("#installBanner").hidden=true; return; }
   let closed=false; try{ closed=localStorage.getItem("courier-install-closed")==="1"; }catch(e){}
   if(standalone||closed) return;
-  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  if(deferredPrompt){ $("#installBtn").hidden=false; $("#installTxt").textContent="אפשר להתקין את מסלול שליח כאפליקציה על המסך הראשי."; $("#installBanner").hidden=false; }
+  const ios=IS_IOS;
+  if(deferredPrompt&&!ios){ $("#installBtn").hidden=false; $("#installTxt").textContent="אפשר להתקין את מסלול שליח כאפליקציה על המסך הראשי."; $("#installBanner").hidden=false; }
   else if(ios){ $("#installBtn").hidden=true; $("#installTxt").textContent=IOS_HOWTO; $("#installBanner").hidden=false; }
 }
 const IOS_HOWTO="להתקנה כאפליקציה: לחץ על כפתור השיתוף (ריבוע עם חץ) ← \"הוספה למסך הבית\".";
 const ANDROID_HOWTO="להתקנה: פתח את תפריט הדפדפן (⋮ למעלה) ← \"התקנת אפליקציה\" או \"הוספה למסך הבית\".";
-function installHowto(){ const ios=/iphone|ipad|ipod/i.test(navigator.userAgent); $("#installBtn").hidden=true; $("#installTxt").textContent=ios?IOS_HOWTO:ANDROID_HOWTO; $("#installBanner").hidden=false; }
+function installHowto(){ const ios=IS_IOS; $("#installBtn").hidden=true; $("#installTxt").textContent=ios?IOS_HOWTO:ANDROID_HOWTO; $("#installBanner").hidden=false; }
 addEventListener("appinstalled",()=>{ deferredPrompt=null; $("#installBanner").hidden=true; });
 
 /* ---------- ordering ---------- */
