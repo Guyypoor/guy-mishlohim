@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>חתימה על מסמך – גיא שליחויות</title>
+<style>
+:root{--bg:#f3f4f6;--card:#fff;--ink:#111827;--muted:#6b7280;--line:#d1d5db;--accent:#0f766e;--accent-ink:#fff;--err:#b91c1c;--ok:#15803d}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#111317;--card:#1b1e24;--ink:#f3f4f6;--muted:#9ca3af;--line:#374151;--accent:#14b8a6;--accent-ink:#04201d;--err:#f87171;--ok:#4ade80}}
+:root[data-theme="dark"]{--bg:#111317;--card:#1b1e24;--ink:#f3f4f6;--muted:#9ca3af;--line:#374151;--accent:#14b8a6;--accent-ink:#04201d;--err:#f87171;--ok:#4ade80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;font-size:16px;line-height:1.5}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px}
+header b{display:block;font-size:17px}
+header span{color:var(--muted);font-size:13px}
+main{max-width:760px;margin:0 auto;padding:12px 16px 40px}
+.pages canvas{display:block;width:100%;height:auto;background:#fff;margin:0 0 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}
+h2{font-size:18px;margin:0 0 10px}
+label.chk{display:flex;gap:10px;align-items:flex-start;font-size:16px;margin:6px 0 14px}
+label.chk input{width:22px;height:22px;flex:none;margin-top:2px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:14px;color:var(--muted);margin-bottom:4px}
+.field input{width:100%;font-size:17px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.padwrap{position:relative;border:2px dashed var(--line);border-radius:10px;background:#fff;touch-action:none}
+#pad{display:block;width:100%;height:190px;touch-action:none;border-radius:10px}
+.padhint{position:absolute;inset:auto 0 8px 0;text-align:center;color:#9ca3af;font-size:13px;pointer-events:none}
+.row{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+button{font:inherit;border:0;border-radius:10px;padding:12px 16px;cursor:pointer}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.primary{background:var(--accent);color:var(--accent-ink);font-weight:700;flex:1;min-width:180px;font-size:17px}
+.primary:disabled{opacity:.45;cursor:not-allowed}
+.msg{margin-top:12px;font-size:15px}
+.err{color:var(--err)}.ok{color:var(--ok)}
+.state{text-align:center;padding:40px 10px}
+.state .big{font-size:44px}
+a.btn{display:inline-block;margin-top:12px;background:var(--accent);color:var(--accent-ink);text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700}
+.muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header><b id="hTitle">טוען מסמך…</b><span id="hSub">גיא שליחויות · חתימה דיגיטלית</span></header>
+<main>
+  <div id="state" class="state"><div class="big">⏳</div><div>טוען את המסמך…</div></div>
+  <div id="doc" hidden>
+    <p class="muted">קרא את המסמך עד הסוף, ואז חתום למטה.</p>
+    <div class="pages" id="pages"></div>
+    <div class="card" id="signCard">
+      <h2>חתימה</h2>
+      <label class="chk"><input type="checkbox" id="agree"> <span>קראתי את ההסכם, הבנתי אותו ואני מסכים לתנאיו.</span></label>
+      <div class="field"><label for="fullName">שם מלא</label><input id="fullName" autocomplete="name"></div>
+      <div class="field"><label>חתימה (עם האצבע)</label>
+        <div class="padwrap"><canvas id="pad"></canvas><div class="padhint" id="padHint">חתום כאן</div></div>
+        <div class="row"><button class="ghost" id="clear" type="button">ניקוי חתימה</button></div>
+      </div>
+      <div class="row"><button class="primary" id="submit" type="button" disabled>חתום ושלח</button></div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+(function(){
+const SB = "https://rtoukdganvoypamxjgwb.supabase.co";
+const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0b3VrZGdhbnZveXBhbXhqZ3diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NzU5NTksImV4cCI6MjEwNzI1MTk1OX0.RSxoPyIPf_KPvwe9rVa2rNsZoSUe5lDxEQmzh14mIFw";
+const token = (new URLSearchParams(location.search).get("t") || "").trim();
+const $ = id => document.getElementById(id);
+let DOC = null, pdfBytes = null, origHash = "";
+
+function showState(icon, html){ $("doc").hidden = true; $("state").hidden = false; $("state").innerHTML = '<div class="big">'+icon+'</div><div>'+html+'</div>'; }
+async function rpc(fn, body){
+  const r = await fetch(SB + "/rest/v1/rpc/" + fn, {method:"POST", headers:{apikey:KEY, Authorization:"Bearer "+KEY, "Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const t = await r.text(); let j; try{ j = JSON.parse(t); }catch(_){ j = t; }
+  if(!r.ok) throw new Error((j && j.message) || ("HTTP " + r.status));
+  return j;
+}
+function b64ToBytes(b64){ const s = atob(b64.replace(/\s/g,"")); const a = new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i] = s.charCodeAt(i); return a; }
+async function sha256(bytes){ const h = await crypto.subtle.digest("SHA-256", bytes); return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join(""); }
+function nowIL(){ return new Date().toLocaleString("he-IL",{timeZone:"Asia/Jerusalem", day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit"}); }
+function dateIL(){ return new Date().toLocaleDateString("en-GB",{timeZone:"Asia/Jerusalem"}); }
+function publicUrl(path){ return SB + "/storage/v1/object/public/esign/" + path; }
+
+async function load(){
+  if(!/^[a-f0-9]{24,64}$/.test(token)){ showState("⚠️","הקישור לא תקין. בקש קישור חדש."); return; }
+  try{ DOC = await rpc("esign_get", {p_token: token}); }catch(e){ showState("⚠️","לא הצלחנו לטעון את המסמך. בדוק חיבור לאינטרנט ונסה שוב.<br><span class='muted'>"+e.message+"</span>"); return; }
+  if(!DOC || DOC.error){ showState("⚠️","המסמך לא נמצא. בקש קישור חדש."); return; }
+  $("hTitle").textContent = DOC.title; document.title = DOC.title;
+  if(DOC.status !== "pending"){
+    showState("✅","המסמך כבר נחתם" + (DOC.signed_at ? " ב-" + new Date(DOC.signed_at).toLocaleString("he-IL",{timeZone:"Asia/Jerusalem"}) : "") + ".<br>" + (DOC.signed_path ? '<a class="btn" href="'+publicUrl(DOC.signed_path)+'">פתיחת המסמך החתום</a>' : ""));
+    return;
+  }
+  pdfBytes = b64ToBytes(DOC.pdf_b64);
+  origHash = await sha256(pdfBytes);
+  if(DOC.pdf_sha256 && DOC.pdf_sha256 !== origHash){ showState("⚠️","המסמך לא תקין (טביעה לא תואמת). פנה לגיא."); return; }
+  $("fullName").value = DOC.signer_name || "";
+  $("state").hidden = true; $("doc").hidden = false;
+  await renderPages();
+  initPad();
+}
+
+async function renderPages(){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf = await pdfjsLib.getDocument({data: pdfBytes.slice()}).promise;
+  const box = $("pages"); box.innerHTML = "";
+  const cssW = Math.min(box.clientWidth || 600, 760);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const vp1 = page.getViewport({scale:1});
+    const vp = page.getViewport({scale: cssW / vp1.width * dpr});
+    const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height;
+    c.setAttribute("aria-label","עמוד "+i);
+    box.appendChild(c);
+    await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+  }
+}
+
+// ---- signature pad ----
+let pad, pctx, drawing = false, hasInk = false, last = null, strokes = 0;
+function initPad(){
+  pad = $("pad"); pctx = pad.getContext("2d");
+  const fit = () => { const r = pad.getBoundingClientRect(); const d = Math.max(2, window.devicePixelRatio||1);
+    const img = hasInk ? pad.toDataURL() : null;
+    pad.width = Math.round(r.width*d); pad.height = Math.round(r.height*d);
+    pctx.setTransform(d,0,0,d,0,0); pctx.lineCap = "round"; pctx.lineJoin = "round"; pctx.strokeStyle = "#0b1f4d"; pctx.lineWidth = 2.6;
+    if(img){ const im = new Image(); im.onload = () => { pctx.save(); pctx.setTransform(1,0,0,1,0,0); pctx.drawImage(im,0,0,pad.width,pad.height); pctx.restore(); }; im.src = img; } };
+  fit(); window.addEventListener("resize", fit);
+  const pos = e => { const r = pad.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+  pad.addEventListener("pointerdown", e => { e.preventDefault(); pad.setPointerCapture(e.pointerId); drawing = true; last = pos(e); pctx.beginPath(); pctx.arc(last.x,last.y,1.2,0,Math.PI*2); pctx.fillStyle="#0b1f4d"; pctx.fill(); });
+  pad.addEventListener("pointermove", e => { if(!drawing) return; e.preventDefault(); const p = pos(e); pctx.beginPath(); pctx.moveTo(last.x,last.y); pctx.lineTo(p.x,p.y); pctx.stroke(); last = p; if(!hasInk){ hasInk = true; $("padHint").hidden = true; } update(); });
+  const end = () => { if(drawing){ drawing = false; strokes++; update(); } };
+  pad.addEventListener("pointerup", end); pad.addEventListener("pointercancel", end); pad.addEventListener("pointerleave", end);
+  $("clear").onclick = () => { pctx.save(); pctx.setTransform(1,0,0,1,0,0); pctx.clearRect(0,0,pad.width,pad.height); pctx.restore(); hasInk = false; strokes = 0; $("padHint").hidden = false; update(); };
+  $("agree").onchange = update; $("fullName").oninput = update;
+  $("submit").onclick = submit;
+  update();
+}
+function update(){ $("submit").disabled = !($("agree").checked && hasInk && $("fullName").value.trim().length >= 2); }
+
+// cropped signature PNG (transparent background)
+function signaturePng(){
+  const w = pad.width, h = pad.height, d = pctx.getImageData(0,0,w,h).data;
+  let x0=w, y0=h, x1=-1, y1=-1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ if(d[(y*w+x)*4+3] > 10){ if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; } }
+  if(x1 < 0) return null;
+  const m = 6; x0=Math.max(0,x0-m); y0=Math.max(0,y0-m); x1=Math.min(w-1,x1+m); y1=Math.min(h-1,y1+m);
+  const c = document.createElement("canvas"); c.width = x1-x0+1; c.height = y1-y0+1;
+  c.getContext("2d").drawImage(pad, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+  return {url: c.toDataURL("image/png"), w: c.width, h: c.height, canvas: c};
+}
+
+function wrapLines(ctx, text, maxW){
+  const words = String(text).split(/\s+/); const lines = []; let cur = "";
+  for(const w of words){ const t = cur ? cur + " " + w : w; if(ctx.measureText(t).width > maxW && cur){ lines.push(cur); cur = w; } else cur = t; }
+  if(cur) lines.push(cur); return lines;
+}
+function certificatePng(sig, typed, when){
+  const W = 1240, H = 1754, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0,0,W,H);
+  x.fillStyle = "#111"; x.direction = "rtl"; x.textAlign = "right";
+  const R = W - 110; let y = 150;
+  x.font = "bold 46px Arial, sans-serif"; x.fillText("אישור חתימה דיגיטלית", R, y); y += 30;
+  x.fillStyle = "#0f766e"; x.fillRect(110, y, W-220, 4); y += 70; x.fillStyle = "#111";
+  const rows = [
+    ["המסמך", DOC.title],
+    ["החותם (לפי המסמך)", DOC.signer_name || ""],
+    ["שם מלא שהוקלד בחתימה", typed],
+    ["תאריך ושעת החתימה (שעון ישראל)", when],
+    ["הצהרת החותם", "קראתי את ההסכם, הבנתי אותו ואני מסכים לתנאיו. ✔"],
+    ["אופן החתימה", "חתימה ביד על מסך הטלפון, דרך קישור אישי שנשלח בוואטסאפ"]
+  ];
+  for(const [k,v] of rows){
+    x.font = "28px Arial, sans-serif"; x.fillStyle = "#555"; x.fillText(k, R, y); y += 44;
+    x.font = "bold 34px Arial, sans-serif"; x.fillStyle = "#111";
+    for(const ln of wrapLines(x, v, W-220)){ x.fillText(ln, R, y); y += 46; }
+    y += 22;
+  }
+  x.font = "28px Arial, sans-serif"; x.fillStyle = "#555"; x.fillText("החתימה", R, y); y += 20;
+  const bw = 620, bh = 260, bx = R - bw; x.strokeStyle = "#bbb"; x.lineWidth = 2; x.strokeRect(bx, y, bw, bh);
+  const s = Math.min((bw-40)/sig.w, (bh-40)/sig.h); const sw = sig.w*s, sh = sig.h*s;
+  x.drawImage(sig.canvas, bx + (bw-sw)/2, y + (bh-sh)/2, sw, sh); y += bh + 60;
+  x.direction = "ltr"; x.textAlign = "left"; x.font = "22px monospace"; x.fillStyle = "#444";
+  const L = 110;
+  const tech = ["Original document SHA-256: " + origHash, "Signing link code: " + token.slice(0,8) + "…", "Device: " + navigator.userAgent];
+  for(const t of tech){ for(const ln of wrapLines(x, t, W-220)){ x.fillText(ln, L, y); y += 32; } y += 8; }
+  x.direction = "rtl"; x.textAlign = "right"; x.font = "24px Arial, sans-serif"; x.fillStyle = "#777";
+  x.fillText("עמוד זה צורף אוטומטית למסמך בעת החתימה · גיא שליחויות", R, H - 90);
+  return c.toDataURL("image/png");
+}
+
+async function submit(){
+  const btn = $("submit"), msg = $("msg"); btn.disabled = true; msg.className = "msg"; msg.textContent = "יוצר את המסמך החתום…";
+  try{
+    const typed = $("fullName").value.trim(); const when = nowIL();
+    const sig = signaturePng(); if(!sig) throw new Error("חסרה חתימה");
+    const { PDFDocument, rgb } = PDFLib;
+    const doc = await PDFDocument.load(pdfBytes);
+    const sigImg = await doc.embedPng(sig.url);
+    const b = DOC.sign_box || null; const pages = doc.getPages();
+    if(b && pages[b.page]){
+      const pg = pages[b.page];
+      const s = Math.min(b.w / sig.w, b.h / sig.h); const sw = sig.w*s, sh = sig.h*s;
+      pg.drawImage(sigImg, {x: b.x + (b.w - sw)/2, y: b.y, width: sw, height: sh});
+      if(b.date_x != null){ const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica); pg.drawText(dateIL(), {x: b.date_x, y: b.date_y, size: b.date_size || 8, font, color: rgb(0.05,0.12,0.3)}); }
+    }
+    const certImg = await doc.embedPng(certificatePng(sig, typed, when));
+    const p0 = pages[0].getSize(); const cp = doc.addPage([p0.width, p0.height]);
+    cp.drawImage(certImg, {x:0, y:0, width:p0.width, height:p0.height});
+    doc.setTitle(DOC.title + " – חתום"); doc.setSubject("Signed by " + typed + " at " + when); doc.setModificationDate(new Date());
+    const out = await doc.save();
+    const outHash = await sha256(out);
+    msg.textContent = "שולח…";
+    const path = "signed/" + token + ".pdf";
+    const up = await fetch(SB + "/storage/v1/object/esign/" + path, {method:"POST", headers:{apikey:KEY, Authorization:"Bearer "+KEY, "Content-Type":"application/pdf", "x-upsert":"false"}, body: new Blob([out], {type:"application/pdf"})});
+    if(!up.ok){ const t = await up.text(); throw new Error("העלאה נכשלה (" + up.status + ") " + t.slice(0,120)); }
+    const res = await rpc("esign_submit", {p_token: token, p_typed_name: typed, p_ua: navigator.userAgent, p_sha256: outHash});
+    if(!res || !res.ok) throw new Error((res && res.error) || "שגיאה");
+    showState("✅","תודה " + typed.split(" ")[0] + "! המסמך נחתם ונשלח לגיא.<br><a class='btn' href='" + publicUrl(path) + "'>פתיחת העותק החתום</a>");
+    window.scrollTo(0,0);
+  }catch(e){
+    msg.className = "msg err"; msg.textContent = "לא הצלחנו לשלוח: " + e.message + ". נסה שוב, ואם זה חוזר – כתוב לבוט של גיא.";
+    btn.disabled = false;
+  }
+}
+load();
+})();
+</script>
+</body>
+</html>
