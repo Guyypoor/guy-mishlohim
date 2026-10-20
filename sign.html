@@ -35,6 +35,7 @@ button{font:inherit;border:0;border-radius:10px;padding:12px 16px;cursor:pointer
 .err{color:var(--err)}.ok{color:var(--ok)}
 .state{text-align:center;padding:40px 10px}
 .state .big{font-size:44px}
+#goSign{position:fixed;left:16px;bottom:16px;z-index:6;background:var(--accent);color:var(--accent-ink);font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 a.btn{display:inline-block;margin-top:12px;background:var(--accent);color:var(--accent-ink);text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700}
 .muted{color:var(--muted);font-size:13px}
 </style>
@@ -44,7 +45,8 @@ a.btn{display:inline-block;margin-top:12px;background:var(--accent);color:var(--
 <main>
   <div id="state" class="state"><div class="big">⏳</div><div>טוען את המסמך…</div></div>
   <div id="doc" hidden>
-    <p class="muted">קרא את המסמך עד הסוף, ואז חתום למטה.</p>
+    <p class="muted">קרא את המסמך עד הסוף, ואז חתום למטה ולחץ <b>"חתום ושלח"</b> – רק אז המסמך נשלח.</p>
+    <button id="goSign" type="button">✍️ לחתימה ↓</button>
     <div class="pages" id="pages"></div>
     <div class="card" id="signCard">
       <h2>חתימה</h2>
@@ -135,6 +137,8 @@ function initPad(){
   $("clear").onclick = () => { pctx.save(); pctx.setTransform(1,0,0,1,0,0); pctx.clearRect(0,0,pad.width,pad.height); pctx.restore(); hasInk = false; strokes = 0; $("padHint").hidden = false; update(); };
   $("agree").onchange = update; $("fullName").oninput = update;
   $("submit").onclick = submit;
+  $("goSign").onclick = () => $("signCard").scrollIntoView({behavior:"smooth"});
+  new IntersectionObserver(es => { $("goSign").hidden = es[0].isIntersecting; }).observe($("signCard"));
   update();
 }
 function update(){ $("submit").disabled = !($("agree").checked && hasInk && $("fullName").value.trim().length >= 2); }
