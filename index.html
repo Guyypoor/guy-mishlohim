@@ -19,6 +19,7 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="cloud.js"></script>
+<script src="files.js"></script>
 <style>
 /* Layout: one narrow column, built for a phone on the dashboard. Road-sign green for actions, amber marks the next stop. */
 :root{
@@ -187,6 +188,7 @@ input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(
         <button class="tab" role="tab" id="tab-xl" aria-controls="pane-xl" aria-selected="false" type="button">מאקסל</button>
         <button class="tab" role="tab" id="tab-man" aria-controls="pane-man" aria-selected="false" type="button">ידני</button>
       </div>
+      <p class="status" id="addMsg" role="status" aria-live="polite"></p>
 
       <div id="pane-wa" role="tabpanel" aria-labelledby="tab-wa">
         <label class="f" for="waText">מדביקים כאן את ההודעה או כמה הודעות מהקבוצה. כל כתובת בשורה משלה. אפשר לכתוב בשורה "דחוף", "אחרי 16:00" או "עד 12:00".
@@ -206,13 +208,14 @@ input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(
         </div>
         <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
         <p class="hint" style="margin:6px 0 10px">מצלמים דף, תעודת משלוח או רשימה מודפסת. אפשר לצלם כמה דפים ברצף – כל צילום מתווסף.</p>
-        <label class="f" for="imgFile">או בחר צילום מסך / תמונה מהגלריה (הזמנה, רשימה או הודעה). אפשר כמה תמונות ביחד.
-          <input type="file" id="imgFile" accept="image/*" multiple>
+        <label class="f" for="imgFile">או בחר צילום מסך / תמונה מהגלריה / קובץ PDF (הזמנה, רשימה או הודעה). אפשר כמה ביחד.
+          <input type="file" id="imgFile" accept="image/*,.heic,.heif,.pdf,application/pdf" multiple>
         </label>
         <div id="imgThumbs" class="thumbs" hidden></div>
         <div class="actions">
           <button class="btn primary" id="imgParse" type="button" disabled>קרא כתובות מהתמונה</button>
           <button class="btn ghost" id="imgAi" type="button" hidden disabled>קריאה מדויקת עם Claude</button>
+          <button class="btn ghost" id="imgClear" type="button" hidden>נקה תמונות</button>
         </div>
         <p class="hint" id="imgHint">הקריאה נעשית כאן בטלפון, בלי לשלוח את התמונה לשום מקום. בפעם הראשונה זה לוקח כמה שניות. לפני ההוספה תוכל לבדוק מה זוהה.</p>
         <div id="imgPreview" class="preview" hidden></div>
@@ -220,8 +223,8 @@ input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(
       </div>
 
       <div id="pane-xl" role="tabpanel" aria-labelledby="tab-xl" hidden>
-        <label class="f" for="xlFile">קובץ אקסל או CSV עם עמודת כתובת
-          <input type="file" id="xlFile" accept=".xlsx,.xls,.csv">
+        <label class="f" for="xlFile">קובץ אקסל, CSV או PDF עם כתובות (גם מוואטסאפ או מהמייל)
+          <input type="file" id="xlFile" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/plain,application/pdf">
         </label>
         <div id="xlMap" hidden>
           <div class="row" style="margin-top:10px">
@@ -399,23 +402,55 @@ const GUESS={
   mCity:/עיר|ישוב|יישוב|city|town/i, mName:/שם|לקוח|נמען|name|customer/i,
   mPhone:/טלפון|נייד|פלאפון|phone|mobile|tel/i, mNote:/הער|note|comment/i
 };
-function readExcel(file){
-  const rd=new FileReader();
-  rd.onload=()=>{
-    try{
-      if(typeof XLSX==="undefined") throw new Error("nolib");
-      const wb=XLSX.read(new Uint8Array(rd.result),{type:"array"});
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false}).filter(r=>r.some(c=>String(c).trim()));
-      if(!rows.length){ setStatus("הקובץ ריק."); return; }
-      let hi=rows.findIndex(r=>r.some(c=>Object.values(GUESS).some(rx=>rx.test(String(c)))));
-      if(hi<0||hi>5){ hi=-1; }
-      xlHead = hi>=0 ? rows[hi].map((c,i)=>String(c).trim()||("עמודה "+(i+1))) : rows[0].map((_,i)=>"עמודה "+(i+1));
-      xlRows = rows.slice(hi+1);
-      buildMapping(); $("#xlMap").hidden=false; renderXlPreview();
-    }catch(e){ setStatus(e.message==="nolib"?"לא הצלחתי לטעון את קורא האקסל. נסה לשמור את הקובץ כ-CSV.":"לא הצלחתי לקרוא את הקובץ. ודא שזה xlsx או csv."); }
-  };
-  rd.readAsArrayBuffer(file);
+function addMsg(t){ const m=$("#addMsg"); if(m) m.textContent=t||""; if(t) setStatus(t); }
+async function readExcel(file){
+  addMsg("קורא את הקובץ…");
+  try{ loadRows(await FileIn.sheetRows(file), file.name); }
+  catch(e){ addMsg(FileIn.why(e,file)); }
+}
+function loadRows(rows,name){
+  {
+    if(!rows.length){ addMsg("הקובץ ריק – לא מצאתי בו שורות."); return; }
+    let hi=rows.findIndex(r=>r.some(c=>Object.values(GUESS).some(rx=>rx.test(String(c)))));
+    if(hi<0||hi>5){ hi=-1; }
+    xlHead = hi>=0 ? rows[hi].map((c,i)=>String(c).trim()||("עמודה "+(i+1))) : rows[0].map((_,i)=>"עמודה "+(i+1));
+    xlRows = rows.slice(hi+1);
+    showTab("tab-xl"); buildMapping(); $("#xlMap").hidden=false; renderXlPreview();
+    addMsg(xlRows.length+" שורות נקראו מ-"+(name||"הקובץ")+". בדוק את העמודות ולחץ 'הוסף למסלול'.");
+  }
+}
+/* כל קובץ שנבחר – בכל לשונית – מנותב לפי הסוג שלו */
+async function onPicked(list){
+  const files=[...(list||[])]; if(!files.length) return;
+  const imgs=[], bad=[];
+  for(const f of files){
+    const k=FileIn.kind(f);
+    if(k==="image") imgs.push(f);
+    else if(k==="pdf") await readPdf(f);
+    else if(k==="text"&&/\.txt$/i.test(f.name||"")) await readTxt(f);
+    else if(k==="sheet"||k==="text") await readExcel(f);
+    else bad.push(f);
+  }
+  if(imgs.length){ showTab("tab-img"); onImages([...imgFiles,...imgs]); addMsg(imgFiles.length+" תמונות מוכנות. לחץ 'קרא כתובות מהתמונה'."); }
+  if(bad.length) addMsg(bad[0]&&FileIn.kind(bad[0])==="numbers"?FileIn.why(null,bad[0]):"סוג הקובץ \""+(bad[0].name||"")+"\" לא נתמך. אפשר: תמונה, PDF, אקסל או CSV.");
+}
+async function readTxt(f){
+  try{ const t=await FileIn.decodeText(await f.arrayBuffer()); showTab("tab-wa"); $("#waText").value=t; showWaPreview(parseWhatsApp(t)); addMsg("הטקסט מהקובץ הודבק בלשונית 'מוואטסאפ'."); }
+  catch(e){ addMsg(FileIn.why(e,f)); }
+}
+async function readPdf(f){
+  showTab("tab-img"); const p=$("#imgPreview"); p.hidden=false; p.textContent="פותח את ה-PDF…"; addMsg("פותח את ה-PDF…");
+  try{
+    const r=await FileIn.pdf(f,{maxPages:10});
+    onImages([...imgFiles,...r.images]);
+    if(r.table){ $("#imgPreview").hidden=true; loadRows(r.table,f.name); return; }
+    const items=parseWhatsApp(r.text);
+    if(items.length){ showImgItems(items," מה-PDF"); addMsg(items.length+" כתובות זוהו מה-PDF"+(r.pages>r.read?" (נקראו "+r.read+" עמודים ראשונים מתוך "+r.pages+")":"")+". בדוק ולחץ 'הוסף למסלול'."); }
+    else { p.textContent="ב-PDF אין טקסט שאפשר לקרוא ישירות (כנראה סריקה). לחץ 'קרא כתובות מהתמונה'."; addMsg("ה-PDF נטען כתמונות. לחץ 'קרא כתובות מהתמונה'."); }
+  }catch(e){ p.textContent=FileIn.why(e,f); addMsg(FileIn.why(e,f)); }
+}
+function showTab(id){
+  document.querySelectorAll(".tab").forEach(x=>{ x.setAttribute("aria-selected",String(x.id===id)); $("#"+x.getAttribute("aria-controls")).hidden=x.id!==id; });
 }
 function buildMapping(){
   for(const id of Object.keys(GUESS)){
@@ -458,7 +493,7 @@ function addStops(items){
   }
   save(); render(); if(ME) pull();
   const skipped=items.length-added;
-  setStatus("נוספו "+added+" עצירות"+(skipped?" ("+skipped+" כפולות דולגו)":"")+".");
+  addMsg("נוספו "+added+" עצירות"+(skipped?" ("+skipped+" כפולות דולגו)":"")+".");
 }
 let waItems=[];
 function showWaPreview(items){
@@ -981,7 +1016,7 @@ async function aiParse(){
 /* ---------- screenshots ---------- */
 let imgFiles=[], imgItems=[], imgOk=false;
 function onImages(files){
-  imgFiles=[...files].slice(0,10); const t=$("#imgThumbs"); t.innerHTML="";
+  imgFiles=[...files].slice(-10); $("#imgClear").hidden=!imgFiles.length; const t=$("#imgThumbs"); t.innerHTML="";
   imgFiles.forEach(f=>{ const u=URL.createObjectURL(f); t.append(el("img",{src:u,alt:"תמונה "+(f.name||"")})); });
   t.hidden=!imgFiles.length; $("#imgParse").disabled=!imgFiles.length; $("#imgAi").disabled=!imgFiles.length||!imgOk;
   $("#imgPreview").hidden=true; $("#imgAddRow").hidden=true;
@@ -1005,6 +1040,7 @@ async function imgParseAi(){
 function showImgItems(items,src){
   imgItems=items; const p=$("#imgPreview"); p.hidden=false; p.innerHTML="";
   if(!items.length){ p.append(el("p",{class:"hint",text:"לא מצאתי כתובות בתמונה. נסה צילום חד יותר, חתוך רק את הרשימה, או הקלד ידנית."})); $("#imgAddRow").hidden=true; return; }
+  addMsg(items.length+" כתובות זוהו"+src+". בדוק ולחץ 'הוסף למסלול'.");
   p.append(el("p",{class:"hint",text:items.length+" כתובות זוהו"+src+" – בדוק מול הצילום ותקן אחרי ההוספה אם צריך:"}));
   items.forEach(x=>p.append(el("div",{},x.addr+(x.city?", "+x.city:""),(x.name||x.phone||x.note)?el("small",{text:" · "+[x.name,x.phone,x.note].filter(Boolean).join(" · ")}):null)));
   $("#imgAddRow").hidden=false;
@@ -1053,7 +1089,7 @@ async function imgParse(){
     for(cur=0;cur<imgFiles.length;cur++){ const r=await w.recognize(await prepImg(imgFiles[cur])); text+="\n"+(r&&r.data&&r.data.text||""); }
     showImgItems(parseWhatsApp(text)," מהתמונה");
   }catch(e){
-    ocrWorker=null;
+    ocrWorker=null; addMsg("הקריאה מהתמונה נכשלה – בדוק שיש אינטרנט ונסה שוב.");
     p.textContent="הקריאה בטלפון נכשלה."+(imgOk?" נסה 'קריאה מדויקת עם Claude'.":" אפשר להעתיק את הטקסט מוואטסאפ ולהדביק בלשונית 'מוואטסאפ'.");
   }finally{ b.disabled=!imgFiles.length; }
 }
@@ -1175,13 +1211,14 @@ $("#defCity").addEventListener("change",e=>{state.defCity=e.target.value.trim();
 $("#waParse").addEventListener("click",()=>showWaPreview(parseWhatsApp($("#waText").value)));
 $("#waAdd").addEventListener("click",()=>{ addStops(waItems); $("#waText").value=""; $("#waPreview").hidden=true; $("#waAddRow").hidden=true; });
 $("#waAi").addEventListener("click",aiParse);
-$("#imgFile").addEventListener("change",e=>onImages(e.target.files));
+$("#imgFile").addEventListener("change",e=>{ const f=[...e.target.files]; e.target.value=""; if(f.length) onPicked(f); });
 $("#camBtn").addEventListener("click",()=>$("#camFile").click());
-$("#camFile").addEventListener("change",e=>{ const f=[...e.target.files]; e.target.value=""; if(f.length){ onImages([...imgFiles,...f]); setStatus(imgFiles.length>1?("צולמו "+imgFiles.length+" דפים. אפשר לצלם עוד או ללחוץ 'קרא כתובות מהתמונה'."):"הצילום נוסף. אפשר לצלם עוד דף או ללחוץ 'קרא כתובות מהתמונה'."); } });
+$("#camFile").addEventListener("change",e=>{ const f=[...e.target.files]; e.target.value=""; if(f.length){ onImages([...imgFiles,...f]); addMsg(imgFiles.length>1?("צולמו "+imgFiles.length+" דפים. אפשר לצלם עוד או ללחוץ 'קרא כתובות מהתמונה'."):"הצילום נוסף. אפשר לצלם עוד דף או ללחוץ 'קרא כתובות מהתמונה'."); } });
 $("#imgParse").addEventListener("click",imgParse);
+$("#imgClear").addEventListener("click",()=>{ onImages([]); imgItems=[]; addMsg(""); });
 $("#imgAi").addEventListener("click",imgParseAi);
 $("#imgAdd").addEventListener("click",()=>{ addStops(imgItems); imgItems=[]; $("#imgFile").value=""; onImages([]); });
-$("#xlFile").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) readExcel(f); });
+$("#xlFile").addEventListener("change",e=>{ const f=[...e.target.files]; e.target.value=""; if(f.length) onPicked(f); });
 ["mAddr","mNum","mCity","mName","mPhone","mNote"].forEach(id=>$("#"+id).addEventListener("change",renderXlPreview));
 $("#xlAdd").addEventListener("click",()=>{ addStops(xlItems()); $("#xlMap").hidden=true; $("#xlFile").value=""; });
 $("#manForm").addEventListener("submit",e=>{ e.preventDefault(); const v=id=>$("#"+id).value.trim(); if(!v("manAddr")) return;

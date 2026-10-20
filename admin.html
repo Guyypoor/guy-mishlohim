@@ -14,6 +14,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="cloud.js"></script>
+<script src="files.js"></script>
 <script src="shared.js"></script>
 <style>
 :root{
@@ -130,7 +131,7 @@ td select{padding:5px 8px;font-size:.9rem;min-width:120px}
           <textarea id="addText"></textarea></label>
       </div>
       <div class="row" style="margin-top:8px">
-        <label class="f">או קובץ אקסל / CSV<input type="file" id="addXl" accept=".xlsx,.xls,.csv"></label>
+        <label class="f">או קובץ אקסל / CSV / PDF<input type="file" id="addXl" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/plain,application/pdf"></label>
         <label class="f">לשבץ ישר לשליח<select id="addTo"><option value="">בלי שיבוץ (אחר כך)</option></select></label>
       </div>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:700">הוספה ידנית של משלוח אחד</summary>
@@ -337,12 +338,26 @@ $("#defCity").onchange=e=>setPref("defCity",e.target.value.trim());
 
 let xlItems=[];
 $("#addXl").onchange=async e=>{
-  const f=e.target.files[0]; if(!f) return; const wb=XLSX.read(await f.arrayBuffer()); const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
-  const head=(rows[0]||[]).map(x=>String(x)); const find=re=>head.findIndex(h=>re.test(h));
-  const ia=find(/כתובת|רחוב|address|street/i), inum=find(/מס(?:פר)?['׳]?\s*בית|^מספר$|house/i), ic=find(/עיר|ישוב|יישוב|city|town/i), iname=find(/שם|לקוח|נמען|name|customer/i), iph=find(/טלפון|נייד|פלאפון|phone|mobile|tel/i), inote=find(/הער|note|comment/i);
-  if(ia<0){ $("#addStatus").textContent="לא מצאתי עמודת כתובת בשורה הראשונה."; return; }
-  xlItems=rows.slice(1).filter(r=>String(r[ia]).trim()).map(r=>{ const note=inote>=0?String(r[inote]):""; const fl=parseFlags(note); return {addr:(String(r[ia])+(inum>=0&&r[inum]!==""?" "+r[inum]:"")).trim(),city:ic>=0?String(r[ic]).trim():"",name:iname>=0?String(r[iname]).trim():"",phone:iph>=0?String(r[iph]).trim():"",note:cleanFlags(note),urgent:fl.urgent,after:fl.after,before:fl.before}; });
-  $("#addStatus").textContent=xlItems.length+" שורות נקראו מהקובץ. לחץ 'הוסף משלוחים'.";
+  const f=e.target.files[0]; e.target.value=""; if(!f) return; xlItems=[];
+  const st=t=>$("#addStatus").textContent=t; st("קורא את הקובץ…");
+  try{
+    const k=FileIn.kind(f);
+    if(k==="pdf"||(k==="text"&&/\.txt$/i.test(f.name||""))){
+      const text=k==="pdf"?(await FileIn.pdf(f,{images:false,maxPages:20})).text:await FileIn.decodeText(await f.arrayBuffer());
+      xlItems=parseWhatsApp(text).map(x=>({...x,city:x.city||""}));
+      st(xlItems.length?xlItems.length+" כתובות זוהו מ-"+f.name+". לחץ 'הוסף משלוחים'.":"לא מצאתי כתובות בקובץ. ב-PDF סרוק – העלה צילום שלו באפליקציית השליח, או הדבק את הכתובות.");
+      return;
+    }
+    if(k!=="sheet"&&k!=="text"){ st(FileIn.why(null,f)); return; }
+    const rows=await FileIn.sheetRows(f);
+    const GUESS=[/כתובת|רחוב|address|street/i,/עיר|ישוב|יישוב|city|town/i];
+    let hr=rows.slice(0,6).findIndex(r=>r.some(c=>GUESS.some(rx=>rx.test(String(c))))); if(hr<0) hr=0;
+    const head=(rows[hr]||[]).map(x=>String(x)); const find=re=>head.findIndex(h=>re.test(h));
+    const ia=find(/כתובת|רחוב|address|street/i), inum=find(/מס(?:פר)?['׳]?\s*בית|^מספר$|house/i), ic=find(/עיר|ישוב|יישוב|city|town/i), iname=find(/שם|לקוח|נמען|name|customer/i), iph=find(/טלפון|נייד|פלאפון|phone|mobile|tel/i), inote=find(/הער|note|comment/i);
+    if(ia<0){ st("לא מצאתי עמודה בשם 'כתובת' או 'רחוב' בשורות הראשונות של הקובץ."); return; }
+    xlItems=rows.slice(hr+1).filter(r=>String(r[ia]).trim()).map(r=>{ const note=inote>=0?String(r[inote]):""; const fl=parseFlags(note); return {addr:(String(r[ia])+(inum>=0&&r[inum]!==""?" "+r[inum]:"")).trim(),city:ic>=0?String(r[ic]).trim():"",name:iname>=0?String(r[iname]).trim():"",phone:iph>=0?String(r[iph]).trim():"",note:cleanFlags(note),urgent:fl.urgent,after:fl.after,before:fl.before}; });
+    st(xlItems.length+" שורות נקראו מ-"+f.name+". לחץ 'הוסף משלוחים'.");
+  }catch(err){ xlItems=[]; st(FileIn.why(err,f)); }
 };
 $("#addBtn").onclick=async()=>{
   const items=[...parseWhatsApp($("#addText").value),...xlItems];
