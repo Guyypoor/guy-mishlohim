@@ -1289,6 +1289,9 @@ function fmtKm(m){ return m<1000?Math.round(m/10)*10+" מ'":(m/1000).toFixed(m<1
 function setStatus(t){ const s=$("#status"); if(s) s.textContent=t||""; }
 function isPick(s){ return s&&s.type==="pickup"; }
 function spotText(s){ const p=s&&s.spot; if(!p) return ""; return [p.z,p.sd,p.h].filter(Boolean).join(" · "); }
+function spotFromStr(t){ const p=String(t||"").split("·").map(x=>x.trim()); const o={z:"",sd:"",h:""}; p.forEach(x=>{ if(["קדימה","אמצע","אחורה"].includes(x)) o.z=x; else if(["ימין","שמאל"].includes(x)) o.sd=x; else if(["רצפה","מדף"].includes(x)) o.h=x; }); return (o.z||o.sd||o.h)?o:null; }
+function extraCols(s){ return {pkg:s.pkg||"",pkgs:s.pkgs?+s.pkgs:null,spot:spotText(s),stop_type:isPick(s)?"pickup":"delivery",last_stop:!!s.last,svc_min:(s.svc!=null&&s.svc!=="")?+s.svc:null}; }
+function podCol(s){ const p=s.pod||{}; return {where:p.where||"",recipient:p.recipient||"",note:p.note||"",photo:!!p.photo,sig:!!p.sig}; }
 function winText(s){ return s.after&&s.before?("בין "+s.after+"–"+s.before):(s.after?"לא לפני "+s.after:(s.before?"עד "+s.before:"")); }
 
 /* ---------- toast ---------- */
@@ -1414,7 +1417,7 @@ function markDelivered(s,pod){
   s.done=true; s.failed=false; s.reason=""; s.doneAt=Date.now(); s.pod=pod||{};
   const r=podText(s);
   track(s,isPick(s)?"נאסף":"נמסר",r); recomputeEta();
-  cloudPatch(s,{status:"delivered",reason:r,done_at:new Date().toISOString()});
+  cloudPatch(s,{status:"delivered",reason:r,done_at:new Date().toISOString(),pod:podCol(s)});
   if(pod&&pod.photoData) IDB.put("p:"+s.id,pod.photoData); if(pod&&pod.sigData) IDB.put("s:"+s.id,pod.sigData);
   if(s.pod){ delete s.pod.photoData; delete s.pod.sigData; }
   afterMark(s,(isPick(s)?"נאסף: ":"נמסר: ")+s.addr);
@@ -1423,14 +1426,14 @@ function markFailed(s,reason,photo){
   askCourier();
   s.done=true; s.failed=true; s.reason=reason||""; s.doneAt=Date.now(); s.pod={photo:!!photo};
   track(s,"לא נמסר",s.reason); recomputeEta();
-  cloudPatch(s,{status:"failed",reason:s.reason,done_at:new Date().toISOString()});
+  cloudPatch(s,{status:"failed",reason:s.reason,done_at:new Date().toISOString(),pod:podCol(s)});
   if(photo) IDB.put("p:"+s.id,photo);
   afterMark(s,"לא נמסר: "+s.addr);
 }
 function unmark(s){
   const was=s.failed?"ביטול 'לא נמסר'":"ביטול מסירה";
   s.done=false; s.failed=false; s.reason=""; s.doneAt=null; s.pod=null; IDB.del("p:"+s.id); IDB.del("s:"+s.id);
-  track(s,was,""); cloudPatch(s,{status:"assigned",reason:"",done_at:null});
+  track(s,was,""); cloudPatch(s,{status:"assigned",reason:"",done_at:null,pod:null});
   // back into the open list, before the current next stop
   const others=state.stops.filter(x=>x!==s); const firstOpen=others.findIndex(x=>!x.done);
   others.splice(firstOpen<0?others.length:firstOpen,0,s); state.stops=others;
@@ -1533,7 +1536,7 @@ function openStop(s){
     const spot={z:sz.get(),sd:ss.get(),h:sh.get()}; s.spot=(spot.z||spot.sd||spot.h)?spot:null;
     const moved=full(s)!==oldKey; if(moved){ s.geo=undefined; s.lat=null; s.lon=null; s.eta=null; }
     if(moved||oldT!==[s.urgent,s.last,s.after,s.before,s.svc].join("|")) state.dirty=true;
-    cloudPatch(s,{addr:s.addr,city:s.city,cust_name:s.name,note:s.note,urgent:!!s.urgent,after_t:s.after,before_t:s.before,lat:s.lat??null,lon:s.lon??null});
+    cloudPatch(s,Object.assign({addr:s.addr,city:s.city,cust_name:s.name,note:s.note,urgent:!!s.urgent,after_t:s.after,before_t:s.before,lat:s.lat??null,lon:s.lon??null},extraCols(s)));
     save(); closeSheets(); render(); if(moved) locateOne(s); else drawMap(false); toast("נשמר");
   }},el("span",{text:"שמור שינויים"}));
   const delB=el("button",{class:"btn danger",type:"button",onclick:()=>{
@@ -2048,7 +2051,9 @@ function rowToStop(r,old){
   const s=old||{id:uid()};
   const addrChanged=old&&(old.addr!==r.addr||(old.city||"")!==(r.city||""));
   Object.assign(s,{rid:r.id,addr:r.addr,city:r.city||"",name:r.cust_name||"",phone:r.cust_phone||"",note:r.note||"",urgent:!!r.urgent,after:r.after_t||"",before:r.before_t||"",
-    done:r.status==="delivered"||r.status==="failed",failed:r.status==="failed",reason:r.reason||"",doneAt:r.done_at?Date.parse(r.done_at):null,mine:r.created_by===ME.id});
+    done:r.status==="delivered"||r.status==="failed",failed:r.status==="failed",reason:r.status==="failed"?(r.reason||""):"",doneAt:r.done_at?Date.parse(r.done_at):null,mine:r.created_by===ME.id,
+    pkg:r.pkg||"",pkgs:r.pkgs||"",spot:spotFromStr(r.spot),type:r.stop_type==="pickup"?"pickup":"",last:!!r.last_stop,svc:r.svc_min??null});
+  if(r.pod&&(r.status==="delivered"||r.status==="failed")) s.pod=Object.assign({},s.pod||{},r.pod); else if(r.status==="assigned") s.pod=null;
   if(addrChanged){ s.lat=null; s.lon=null; s.geo=undefined; s.gk=undefined; }
   if(s.lat==null&&r.lat!=null){ s.lat=r.lat; s.lon=r.lon; s.geo=r.geo||"street"; s.gk=full(s); }
   return s;
@@ -2060,7 +2065,7 @@ async function pull(){
     await flushQ();
     // local stops not yet on the server → insert
     for(const s of state.stops.filter(x=>!x.rid)){
-      const { data, error }=await C.sb.from("deliveries").insert({created_by:ME.id,assigned_to:ME.id,status:s.done?(s.failed?"failed":"delivered"):"assigned",addr:s.addr,city:s.city||"",cust_name:s.name||"",cust_phone:s.phone||"",note:s.note||"",urgent:!!s.urgent,after_t:s.after||"",before_t:s.before||"",lat:s.lat??null,lon:s.lon??null,geo:s.geo||null}).select("id").single();
+      const { data, error }=await C.sb.from("deliveries").insert({created_by:ME.id,assigned_to:ME.id,status:s.done?(s.failed?"failed":"delivered"):"assigned",addr:s.addr,city:s.city||"",cust_name:s.name||"",cust_phone:s.phone||"",note:s.note||"",urgent:!!s.urgent,after_t:s.after||"",before_t:s.before||"",lat:s.lat??null,lon:s.lon??null,geo:s.geo||null,...extraCols(s),pod:s.done?podCol(s):null}).select("id").single();
       if(!error&&data){ s.rid=data.id; s.mine=true; }
     }
     const { data, error }=await C.sb.from("deliveries").select("*").eq("assigned_to",ME.id).eq("day",C.todayIL()).in("status",["assigned","delivered","failed"]).order("seq",{ascending:true,nullsFirst:false}).order("id");

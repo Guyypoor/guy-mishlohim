@@ -143,6 +143,11 @@ td select{padding:5px 8px;font-size:.9rem;min-width:120px}
           <label class="f">הערה<input id="mNote"></label><label class="f">לא לפני<input id="mAfter" type="time"></label><label class="f">עד<input id="mBefore" type="time"></label>
           <label class="f" style="flex:0 0 auto"><span>&nbsp;</span><span class="chkline"><label><input type="checkbox" id="mUrg"> דחוף</label></span></label>
         </div>
+        <div class="row" style="margin-top:8px">
+          <label class="f">מספר משלוח<input id="mPkg"></label><label class="f">חבילות<input id="mPkgs" type="number" min="1" max="99"></label>
+          <label class="f">סוג<select id="mType"><option value="delivery">מסירה</option><option value="pickup">איסוף</option></select></label>
+          <label class="f" style="flex:0 0 auto"><span>&nbsp;</span><span class="chkline"><label><input type="checkbox" id="mLast"> אחרון במסלול</label></span></label>
+        </div>
       </details>
       <div class="actions"><button class="btn primary" id="addBtn" type="button">הוסף משלוחים</button><span class="status" id="addStatus"></span></div>
     </div>
@@ -275,7 +280,7 @@ function renderLive(){
   const today=DEL.filter(d=>d.status!=="cancelled");
   for(const d of today){ if(d.lat==null) continue;
     L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:`<div class="pin" style="background:${STC[d.status]}">${d.seq||"•"}</div>`,iconSize:[26,26],iconAnchor:[13,13]})})
-     .bindPopup(`<b>${esc(d.addr)}${d.city?", "+esc(d.city):""}</b><br>${esc(d.cust_name)} ${esc(d.cust_phone)}<br>${ST[d.status]} · ${esc(nameOf(d.assigned_to))}${d.done_at?"<br>"+clk(d.done_at):""}${d.reason?"<br>סיבה: "+esc(d.reason):""}`).addTo(layer); pts.push([d.lat,d.lon]); }
+     .bindPopup(`<b>${esc(d.addr)}${d.city?", "+esc(d.city):""}</b><br>${esc(d.cust_name)} ${esc(d.cust_phone)}<br>${ST[d.status]} · ${esc(nameOf(d.assigned_to))}${d.done_at?"<br>"+clk(d.done_at):""}${d.reason?"<br>"+(d.status==="failed"?"סיבה: ":"")+esc(d.reason):""}${d.pkg?"<br>משלוח #"+esc(d.pkg):""}${d.spot?"<br>📦 "+esc(d.spot):""}${d.stop_type==="pickup"?"<br>איסוף":""}`).addTo(layer); pts.push([d.lat,d.lon]); }
   for(const p of POS){ const prof=PROF.find(x=>x.id===p.courier); if(!prof) continue; const stale=Date.now()-Date.parse(p.updated_at)>3600000; if(!p.on_shift&&stale) continue;
     L.marker([p.lat,p.lon],{zIndexOffset:1000,icon:L.divIcon({className:"",html:`<div class="cpin ${p.on_shift?"":"off"}">🛵 ${esc(prof.full_name||prof.phone)}</div>`,iconSize:null,iconAnchor:[20,12]})})
      .bindPopup(`<b>${esc(prof.full_name)}</b><br>${p.on_shift?"במשמרת":"לא במשמרת"} · עודכן ${ago(p.updated_at)}`).addTo(layer); pts.push([p.lat,p.lon]); }
@@ -308,6 +313,7 @@ function renderAssignSelects(){
   w.replaceChildren(...couriers().map(c=>{ const on=POS.find(p=>p.courier===c.id&&p.on_shift); const i=el("input",{type:"checkbox",value:c.id}); i.checked=prev.size?prev.has(c.id):!!on; return el("label",{},i," "+(c.full_name||c.phone)); }));
   const rw=$("#rWho"), rc=rw.value; rw.replaceChildren(el("option",{value:"",text:"כולם"}),...PROF.filter(p=>p.role==="courier"||DEL.some(d=>d.assigned_to===p.id)).map(c=>el("option",{value:c.id,text:c.full_name||c.phone}))); rw.value=rc;
 }
+function podHint(d){ const p=d.pod; if(!p||!(p.photo||p.sig)) return null; return el("div",{class:"hint",text:[p.photo?"📷 צולם":"",p.sig?"✍️ נחתם":""].filter(Boolean).join(" · ")+" (בטלפון של השליח)"}); }
 function renderDel(){
   const f=$("#fStatus").value; const rows=DEL.filter(d=>!f||d.status===f);
   $("#delCount").textContent=DEL.length+" משלוחים ביום הזה · "+DEL.filter(d=>d.status==="new").length+" לא משובצים";
@@ -315,12 +321,15 @@ function renderDel(){
   rows.forEach((d,i)=>{
     const sel=el("select",{"aria-label":"שליח",disabled:(d.status==="delivered"||d.status==="failed")?true:null,onchange:e=>assign(d,e.target.value)},el("option",{value:"",text:"— לא משובץ —"}),...couriers().map(c=>el("option",{value:c.id,text:c.full_name||c.phone})));
     sel.value=d.assigned_to||"";
-    const flags=[d.urgent?el("span",{class:"chip urgent",text:"דחוף"}):null,(d.after_t||d.before_t)?el("span",{class:"chip",text:d.after_t&&d.before_t?d.after_t+"–"+d.before_t:(d.after_t?"אחרי "+d.after_t:"עד "+d.before_t)}):null,d.lat==null?el("span",{class:"chip",text:"⚠ לא במפה"}):null];
+    const flags=[d.urgent?el("span",{class:"chip urgent",text:"דחוף"}):null,(d.after_t||d.before_t)?el("span",{class:"chip",text:d.after_t&&d.before_t?d.after_t+"–"+d.before_t:(d.after_t?"אחרי "+d.after_t:"עד "+d.before_t)}):null,d.lat==null?el("span",{class:"chip",text:"⚠ לא במפה"}):null,
+      d.stop_type==="pickup"?el("span",{class:"chip",text:"איסוף"}):null, d.last_stop?el("span",{class:"chip",text:"אחרון"}):null,
+      d.pkg?el("span",{class:"chip",text:"#"+d.pkg}):null, d.pkgs>1?el("span",{class:"chip",text:d.pkgs+" חבילות"}):null,
+      d.spot?el("span",{class:"chip",text:"📦 "+d.spot}):null];
     tb.append(el("tr",{},el("td",{text:String(d.seq||i+1)}),
       el("td",{},el("b",{text:d.addr+(d.city?", "+d.city:"")}),...flags,d.note?el("div",{class:"hint",text:d.note}):null),
       el("td",{},d.cust_name||"",d.cust_phone?el("div",{class:"hint",text:d.cust_phone}):null),
       el("td",{},sel),
-      el("td",{},el("span",{class:"badge b-"+d.status,text:ST[d.status]}),d.reason?el("div",{class:"hint",text:d.reason}):null),
+      el("td",{},el("span",{class:"badge b-"+d.status,text:ST[d.status]}),d.reason?el("div",{class:"hint",text:d.reason}):null,podHint(d)),
       el("td",{text:d.done_at?clk(d.done_at):(d.eta?"~"+clk(d.eta):"")}),
       el("td",{},(d.status==="new"||d.status==="assigned")?el("button",{class:"btn danger sm",type:"button",text:"בטל",onclick:()=>cancelDel(d)}):(d.status==="cancelled"?el("button",{class:"btn ghost sm",type:"button",text:"שחזר",onclick:()=>assign(d,d.assigned_to||"")}):null))));
   });
@@ -353,29 +362,29 @@ $("#addXl").onchange=async e=>{
     const GUESS=[/כתובת|רחוב|address|street/i,/עיר|ישוב|יישוב|city|town/i];
     let hr=rows.slice(0,6).findIndex(r=>r.some(c=>GUESS.some(rx=>rx.test(String(c))))); if(hr<0) hr=0;
     const head=(rows[hr]||[]).map(x=>String(x)); const find=re=>head.findIndex(h=>re.test(h));
-    const ia=find(/כתובת|רחוב|address|street/i), inum=find(/מס(?:פר)?['׳]?\s*בית|^מספר$|house/i), ic=find(/עיר|ישוב|יישוב|city|town/i), iname=find(/שם|לקוח|נמען|name|customer/i), iph=find(/טלפון|נייד|פלאפון|phone|mobile|tel/i), inote=find(/הער|note|comment/i);
+    const ia=find(/כתובת|רחוב|address|street/i), inum=find(/מס(?:פר)?['׳]?\s*בית|^מספר$|house/i), ic=find(/עיר|ישוב|יישוב|city|town/i), iname=find(/שם|לקוח|נמען|name|customer/i), iph=find(/טלפון|נייד|פלאפון|phone|mobile|tel/i), inote=find(/הער|note|comment/i), ipkg=find(/מס(?:פר)?['׳]?\s*(?:משלוח|הזמנה|מעקב)|ברקוד|tracking|barcode|order/i), ipkgs=find(/כמות|חבילות|qty|packages/i);
     if(ia<0){ st("לא מצאתי עמודה בשם 'כתובת' או 'רחוב' בשורות הראשונות של הקובץ."); return; }
-    xlItems=rows.slice(hr+1).filter(r=>String(r[ia]).trim()).map(r=>{ const note=inote>=0?String(r[inote]):""; const fl=parseFlags(note); return {addr:(String(r[ia])+(inum>=0&&r[inum]!==""?" "+r[inum]:"")).trim(),city:ic>=0?String(r[ic]).trim():"",name:iname>=0?String(r[iname]).trim():"",phone:iph>=0?String(r[iph]).trim():"",note:cleanFlags(note),urgent:fl.urgent,after:fl.after,before:fl.before}; });
+    xlItems=rows.slice(hr+1).filter(r=>String(r[ia]).trim()).map(r=>{ const note=inote>=0?String(r[inote]):""; const fl=parseFlags(note); return {addr:(String(r[ia])+(inum>=0&&r[inum]!==""?" "+r[inum]:"")).trim(),city:ic>=0?String(r[ic]).trim():"",name:iname>=0?String(r[iname]).trim():"",phone:iph>=0?String(r[iph]).trim():"",note:cleanFlags(note),urgent:fl.urgent,after:fl.after,before:fl.before,pkg:ipkg>=0?String(r[ipkg]).trim():"",pkgs:ipkgs>=0&&+r[ipkgs]>0?+r[ipkgs]:null}; });
     st(xlItems.length+" שורות נקראו מ-"+f.name+". לחץ 'הוסף משלוחים'.");
   }catch(err){ xlItems=[]; st(FileIn.why(err,f)); }
 };
 $("#addBtn").onclick=async()=>{
   const items=[...parseWhatsApp($("#addText").value),...xlItems];
   const v=id=>$("#"+id).value.trim();
-  if(v("mAddr")) items.push({addr:v("mAddr"),city:v("mCity"),name:v("mName"),phone:v("mPhone"),note:v("mNote"),urgent:$("#mUrg").checked,after:v("mAfter"),before:v("mBefore")});
+  if(v("mAddr")) items.push({addr:v("mAddr"),city:v("mCity"),name:v("mName"),phone:v("mPhone"),note:v("mNote"),urgent:$("#mUrg").checked,after:v("mAfter"),before:v("mBefore"),pkg:v("mPkg"),pkgs:v("mPkgs"),type:$("#mType").value,last:$("#mLast").checked});
   if(!items.length){ $("#addStatus").textContent="אין מה להוסיף – הדבק כתובות, בחר קובץ או מלא הוספה ידנית."; return; }
   const b=$("#addBtn"); b.disabled=true; const to=$("#addTo").value; const defCity=$("#defCity").value.trim();
   const rows=[]; let k=0;
   for(const it of items){ k++; $("#addStatus").textContent="מאתר כתובות במפה ("+k+"/"+items.length+")...";
     const text=[it.addr,it.city||(/,/.test(it.addr)?"":defCity)].filter(Boolean).join(", ");
     let g=null; try{ g=(await preciseGeocode(G,text,defCity))||(G?geocode(G,text,defCity,null):null); }catch(e){}
-    rows.push({created_by:ME.id,day:$("#dDay").value||C.todayIL(),assigned_to:to||null,status:to?"assigned":"new",addr:it.addr,city:it.city||"",cust_name:it.name||"",cust_phone:it.phone||"",note:it.note||"",urgent:!!it.urgent,after_t:it.after||"",before_t:it.before||"",lat:g?g.lat:null,lon:g?g.lon:null,geo:g?g.q:null});
+    rows.push({created_by:ME.id,day:$("#dDay").value||C.todayIL(),assigned_to:to||null,status:to?"assigned":"new",addr:it.addr,city:it.city||"",cust_name:it.name||"",cust_phone:it.phone||"",note:it.note||"",urgent:!!it.urgent,after_t:it.after||"",before_t:it.before||"",lat:g?g.lat:null,lon:g?g.lon:null,geo:g?g.q:null,pkg:it.pkg||"",pkgs:it.pkgs?+it.pkgs:null,stop_type:it.type==="pickup"?"pickup":"delivery",last_stop:!!it.last});
   }
   const { error }=await sb.from("deliveries").insert(rows);
   b.disabled=false;
   if(error){ $("#addStatus").textContent=C.errText(error); return; }
   $("#addStatus").textContent="נוספו "+rows.length+" משלוחים"+(to?" ושובצו ל"+nameOf(to):"")+"."+(rows.some(r=>r.lat==null)?" חלק לא אותרו במפה (מסומנים).":"");
-  $("#addText").value=""; $("#addXl").value=""; xlItems=[]; ["mAddr","mCity","mName","mPhone","mNote","mAfter","mBefore"].forEach(id=>$("#"+id).value=""); $("#mUrg").checked=false;
+  $("#addText").value=""; $("#addXl").value=""; xlItems=[]; ["mAddr","mCity","mName","mPhone","mNote","mAfter","mBefore","mPkg","mPkgs"].forEach(id=>$("#"+id).value=""); $("#mUrg").checked=false; $("#mLast").checked=false; $("#mType").value="delivery";
   loadDeliveries();
 };
 $("#splitBtn").onclick=async()=>{
@@ -446,9 +455,9 @@ $("#rGo").onclick=async()=>{
 };
 $("#rCsv").onclick=()=>{
   if(!REP){ alert("לחץ קודם 'הצג'."); return; }
-  const head=["יום","שליח","כתובת","עיר","לקוח","טלפון","סטטוס","סיבה","שעת מסירה","דחוף","הערה"];
+  const head=["יום","שליח","כתובת","עיר","לקוח","טלפון","סטטוס","סיבה / פרטי מסירה","שעת מסירה","דחוף","הערה","מספר משלוח","חבילות","מיקום ברכב","סוג","איפה נמסר","שם המקבל"];
   const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
-  const lines=[head.map(q).join(",")].concat(REP.map(d=>[d.day,nameOf(d.assigned_to),d.addr,d.city,d.cust_name,d.cust_phone,ST[d.status],d.reason,d.done_at?new Date(d.done_at).toLocaleString("he-IL"):"",d.urgent?"כן":"",d.note].map(q).join(",")));
+  const lines=[head.map(q).join(",")].concat(REP.map(d=>[d.day,nameOf(d.assigned_to),d.addr,d.city,d.cust_name,d.cust_phone,ST[d.status],d.reason,d.done_at?new Date(d.done_at).toLocaleString("he-IL"):"",d.urgent?"כן":"",d.note,d.pkg||"",d.pkgs||"",d.spot||"",d.stop_type==="pickup"?"איסוף":"מסירה",(d.pod&&d.pod.where)||"",(d.pod&&d.pod.recipient)||""].map(q).join(",")));
   const blob=new Blob(["﻿"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
   const a=el("a",{href:URL.createObjectURL(blob),download:"משלוחים_"+$("#rFrom").value+"_"+$("#rTo").value+".csv"}); document.body.append(a); a.click(); a.remove();
 };
