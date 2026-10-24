@@ -283,6 +283,7 @@ textarea{min-height:110px;resize:vertical}
       <div class="mainact">
         <button class="btn primary block big" id="mainBtn" type="button"></button>
         <button class="iconbtn" id="importBtn" type="button" aria-label="ייבוא כתובות" style="width:56px;height:56px"><span class="i" data-i="plus"></span></button>
+        <button class="iconbtn" id="clearBtn" type="button" aria-label="ניקוי כל הרשימה" title="ניקוי כל הרשימה" style="width:56px;height:56px;color:var(--danger)" hidden><span class="i" data-i="trash"></span></button>
       </div>
     </div>
     <div id="driveHead" hidden></div>
@@ -1656,7 +1657,7 @@ function openStop(s){
     save(); closeSheets(); render(); if(moved) locateOne(s); else drawMap(false); toast("נשמר");
   }},el("span",{text:"שמור שינויים"}));
   const delB=el("button",{class:"btn danger",type:"button",onclick:()=>{
-    if(ME&&s.rid&&!s.mine){ toast("את המשלוח הזה שיבץ המנהל – רק הוא יכול להסיר אותו."); return; }
+    if(ME&&s.rid&&!s.mine&&ME.role!=="admin"){ toast("את המשלוח הזה שיבץ המנהל – רק הוא יכול להסיר אותו."); return; }
     if(delB.dataset.arm!=="1"){ delB.dataset.arm="1"; delB.lastChild.textContent=" בטוח? לחץ שוב"; return; }
     if(ME&&s.rid) cloudPatch(s,{status:"cancelled"});
     state.stops=state.stops.filter(x=>x.id!==s.id); state.dirty=true; IDB.del("p:"+s.id); IDB.del("s:"+s.id); save(); closeSheets(); render(); drawMap(false); toast("העצירה נמחקה");
@@ -1721,6 +1722,7 @@ function renderPlanHead(){
   if(done) meta=(meta?meta+" · ":"")+done+" טופלו";
   $("#sumMeta").textContent=meta;
   $("#progBar").style.width=(total?Math.round(done/total*100):0)+"%";
+  $("#clearBtn").hidden=!total||!!state.example;
   const b=$("#mainBtn"); b.disabled=false; b.innerHTML="";
   if(BUSY){ b.disabled=true; b.append(el("span",{text:"מחשב מסלול…"})); return; }
   if(!total){ b.append(icon("plus"),el("span",{text:"הוסף עצירה ראשונה"})); b.onclick=()=>$("#q").focus(); return; }
@@ -1950,7 +1952,7 @@ function archive(){
 function newRoute(){
   archive(); let kept=[];
   if(ME){ // on the server: cancel the stops this courier added; stops the manager assigned stay (only he can remove them)
-    for(const s of state.stops){ if(s.done) continue; if(s.rid&&!s.mine){ kept.push(s); continue; } if(s.rid) cloudPatch(s,{status:"cancelled"}); }
+    for(const s of state.stops){ if(s.done) continue; if(s.rid&&!s.mine&&ME.role!=="admin"){ kept.push(s); continue; } if(s.rid) cloudPatch(s,{status:"cancelled"}); }
     state.clearedAt=Date.now();
   }
   state.stops=kept; state.example=false; state.driving=false; state.sum=null; state.dirty=kept.length>0; state.line=null; state.lineKey=null; state.driveStart=null;
@@ -2039,6 +2041,15 @@ $("#menuBtn").addEventListener("click",()=>openSheet("menu"));
 $("#mReopt").addEventListener("click",()=>{ closeSheets(); orderGeo(); });
 $("#mReverse").addEventListener("click",reverseRoute);
 $("#mHistory").addEventListener("click",openHistory);
+$("#clearBtn").addEventListener("click",()=>{
+  const open=openStops().length;
+  dyn("ניקוי כל הרשימה",
+    el("p",{text:"למחוק את כל "+state.stops.length+" העצירות מהרשימה?"+(open?" ("+open+" עוד לא נמסרו)":"")+" המסלול הנוכחי יישמר ב'מסלולים קודמים'."}),
+    (ME&&ME.role!=="admin")?el("p",{class:"hint",text:"משלוחים ששובצו לך מהפאנל יישארו – רק המנהל יכול להסיר אותם."}):null,
+    el("div",{class:"actions"},
+      el("button",{class:"btn danger big block",type:"button",onclick:()=>{ closeSheets(); newRoute(); }},icon("trash"),el("span",{text:" כן, נקה הכול"})),
+      el("button",{class:"btn ghost big block",type:"button","data-close":""},el("span",{text:"ביטול"}))));
+});
 $("#mNew").addEventListener("click",e=>{ const b=e.currentTarget; if(b.dataset.arm!=="1"){ b.dataset.arm="1"; b.lastChild.textContent="בטוח? לחץ שוב לניקוי"; setTimeout(()=>{ b.dataset.arm=""; b.lastChild.textContent="ניקוי המסלול"; },4000); return; } b.dataset.arm=""; b.lastChild.textContent="ניקוי המסלול"; closeSheets(); newRoute(); });
 $("#svcMin").addEventListener("change",e=>{ state.svcMin=e.target.value===""?3:Math.max(0,+e.target.value); applySettings(); state.dirty=true; save(); render(); });
 $("#navApp").addEventListener("change",e=>{ state.navApp=e.target.value; save(); render(); });
