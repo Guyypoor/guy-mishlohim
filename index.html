@@ -2,11 +2,11 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="מסלול שליח">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#0B6B3A">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -15,88 +15,224 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700;800&family=Assistant:wght@400;600;700&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="cloud.js"></script>
 <script src="files.js"></script>
 <style>
-/* Layout: one narrow column, built for a phone on the dashboard. Road-sign green for actions, amber marks the next stop. */
+/* Map-first layout: the map fills the screen, the route lives in a bottom sheet you drag up and down.
+   Road-sign green = actions, amber = the stop you are driving to now, blue = you. */
 :root{
-  --bg:#EEF2EF; --surface:#FFFFFF; --ink:#15201A; --muted:#5A6A61; --line:#D3DCD6;
-  --sign:#0B6B3A; --sign-ink:#FFFFFF; --amber:#E39B12; --amber-soft:#FFF4DC; --done:#97A69D; --danger:#B3261E;
+  --bg:#F3F5F4; --surface:#FFFFFF; --surface-2:#F7F9F8; --ink:#14201A; --muted:#56665D; --line:#DAE2DD;
+  --sign:#0B6B3A; --sign-ink:#FFFFFF; --sign-soft:#E3F1E8;
+  --amber:#E39B12; --amber-ink:#1C1404; --amber-soft:#FFF4DC;
+  --ok:#0B6B3A; --done:#8E9C94; --danger:#B3261E; --danger-soft:#FBE9E7; --me:#2563EB;
+  --shadow:0 8px 28px rgba(16,32,24,.18), 0 2px 6px rgba(16,32,24,.10);
   --font-display:"Rubik","Assistant",system-ui,sans-serif;
   --font-body:"Assistant","Rubik",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
-  --r:12px;
+  --r:14px; --top:calc(env(safe-area-inset-top,0px) + 10px);
+  color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0E1411; --surface:#16201A; --ink:#E4EDE8; --muted:#94A49B; --line:#26342C;
-  --sign:#1E9457; --sign-ink:#FFFFFF; --amber:#F2B23A; --amber-soft:#3A2E12; --done:#5F6E66; --danger:#F2867E; color-scheme:dark}}
+  --bg:#0E1411; --surface:#17211B; --surface-2:#1C2821; --ink:#E4EDE8; --muted:#9AAAA1; --line:#2A3830;
+  --sign:#1E9457; --sign-ink:#FFFFFF; --sign-soft:#173526; --amber:#F2B23A; --amber-ink:#1C1404; --amber-soft:#3A2E12;
+  --ok:#3DBA74; --done:#66756D; --danger:#F2867E; --danger-soft:#3A1A18; --me:#60A5FA; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0E1411; --surface:#16201A; --ink:#E4EDE8; --muted:#94A49B; --line:#26342C;
-  --sign:#1E9457; --sign-ink:#FFFFFF; --amber:#F2B23A; --amber-soft:#3A2E12; --done:#5F6E66; --danger:#F2867E; color-scheme:dark}
+  --bg:#0E1411; --surface:#17211B; --surface-2:#1C2821; --ink:#E4EDE8; --muted:#9AAAA1; --line:#2A3830;
+  --sign:#1E9457; --sign-ink:#FFFFFF; --sign-soft:#173526; --amber:#F2B23A; --amber-ink:#1C1404; --amber-soft:#3A2E12;
+  --ok:#3DBA74; --done:#66756D; --danger:#F2867E; --danger-soft:#3A1A18; --me:#60A5FA; color-scheme:dark}
 *{box-sizing:border-box}
-html,body{background:var(--bg)}
-body{color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;direction:rtl}
-.wrap{max-width:720px;margin:0 auto;padding-inline:16px;padding-block:0 40px}
-.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--sign);color:var(--sign-ink);margin-inline:-16px;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.top h1{font-family:var(--font-display);font-weight:800;font-size:1.35rem;margin:0;letter-spacing:.2px;text-wrap:balance}
-.top .date{opacity:.85;font-size:.9rem}
-.progress{margin-inline-start:auto;display:flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;font-weight:700}
-.bar{width:90px;height:8px;border-radius:99px;background:rgba(255,255,255,.28);overflow:hidden}
-.bar i{display:block;height:100%;background:var(--sign-ink);width:0}
-section{margin-top:18px}
-.label{font-family:var(--font-display);font-weight:700;font-size:.8rem;letter-spacing:.6px;color:var(--muted);margin:0 0 8px}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px}
-.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.tab{flex:1 1 0;min-width:96px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:10px;padding:10px 8px;font:600 .95rem var(--font-body);cursor:pointer}
-.tab[aria-selected="true"]{background:var(--sign);border-color:var(--sign);color:var(--sign-ink)}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.row>*{flex:1 1 160px;min-width:0}
-label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted);font-weight:600}
-input[type=text],input[type=tel],textarea,select{width:100%;font:400 1rem var(--font-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-textarea{min-height:120px;resize:vertical}
-input:focus,textarea:focus,select:focus,button:focus-visible,a:focus-visible{outline:3px solid var(--amber);outline-offset:1px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:10px;padding:11px 16px;font:700 1rem var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden}
+body{color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;direction:rtl;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button,input,select,textarea{font:inherit;color:inherit}
+[hidden]{display:none!important}
+.i{display:inline-flex;width:20px;height:20px;flex:none}
+.i svg{width:100%;height:100%}
+/* ---------- map ---------- */
+#map{position:fixed;inset:0;z-index:0;background:#DDE5E0}
+#map.nomap::after{content:"המפה לא נטענה – בדוק חיבור לאינטרנט.";position:absolute;top:40%;inset-inline:16px;text-align:center;color:var(--muted)}
+.leaflet-container{font-family:var(--font-body)}
+.leaflet-control-attribution{font-size:10px!important}
+.leaflet-top.leaflet-left{top:calc(var(--top) + 212px)}
+.pin{width:30px;height:30px;border-radius:50%;background:var(--sign);color:#fff;display:grid;place-items:center;font:800 13px/1 var(--font-display);border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);font-variant-numeric:tabular-nums}
+.pin.next{width:38px;height:38px;font-size:15px;background:var(--amber);color:var(--amber-ink);border-width:3px}
+.pin.done{background:#9AA8A0;width:24px;height:24px;font-size:11px}
+.pin.failed{background:var(--danger);width:24px;height:24px;font-size:11px}
+.pin.urg{background:var(--danger)}
+.pin.pick{border-radius:8px}
+.pin.s{background:#14201A}
+.me-dot{width:18px;height:18px;border-radius:50%;background:var(--me);border:3px solid #fff;box-shadow:0 0 0 6px rgba(37,99,235,.22),0 1px 4px rgba(0,0,0,.4)}
+/* ---------- top bar ---------- */
+.topbar{position:fixed;top:var(--top);inset-inline:12px;z-index:20;display:flex;gap:8px;align-items:center}
+.fab{width:48px;height:48px;border-radius:50%;border:0;background:var(--surface);box-shadow:var(--shadow);display:grid;place-items:center;cursor:pointer;flex:none}
+.fab .i{width:22px;height:22px}
+.search{flex:1;min-width:0;height:48px;display:flex;align-items:center;gap:6px;background:var(--surface);border-radius:24px;box-shadow:var(--shadow);padding-inline:14px 6px}
+.search input,.search input[type=text]{flex:1;min-width:0;border:0;background:transparent;font-size:1rem;outline:none;height:100%;padding:0 4px;min-height:0;border-radius:0}
+.search .i{color:var(--muted)}
+.search button{border:0;background:transparent;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.search button.rec{color:#fff;background:var(--danger)}
+.search:focus-within{outline:3px solid var(--amber);outline-offset:1px}
+.suggest{position:fixed;top:calc(var(--top) + 56px);inset-inline:12px;z-index:21;background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);max-height:min(60vh,420px);overflow:auto;padding:6px 0}
+.suggest button{display:flex;gap:12px;align-items:center;width:100%;border:0;background:transparent;text-align:start;padding:10px 14px;cursor:pointer}
+.suggest button:hover,.suggest button:focus-visible{background:var(--surface-2);outline:none}
+.suggest b{display:block;font:600 1rem var(--font-body)}
+.suggest small{color:var(--muted)}
+.suggest .i{color:var(--muted)}
+.suggest .imp{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px 6px;border-top:1px solid var(--line);margin-top:4px}
+.suggest .imp .btn{flex:1 1 auto;width:auto;padding:6px 10px}
+.mapctl{position:fixed;top:calc(var(--top) + 60px);left:12px;z-index:15;display:flex;flex-direction:column;gap:8px}
+.mapctl .fab{width:44px;height:44px}
+/* ---------- bottom sheet ---------- */
+.sheet{position:fixed;inset-inline:0;bottom:0;z-index:10;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -6px 24px rgba(16,32,24,.16);display:flex;flex-direction:column;will-change:transform;touch-action:none;max-width:720px;margin-inline:auto}
+.sheet.anim{transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.grab{padding:8px 0 4px;display:grid;place-items:center;cursor:grab;flex:none}
+.grab span{width:44px;height:5px;border-radius:9px;background:var(--line)}
+.sheet-head{padding:0 16px 10px;flex:none}
+.sheet-body{flex:1;overflow:auto;padding:0 16px calc(env(safe-area-inset-bottom,0px) + 24px);touch-action:pan-y;overscroll-behavior:contain;border-top:1px solid var(--line)}
+.sum{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sum b{font:800 1.25rem var(--font-display)}
+.sum span{color:var(--muted);font-size:.92rem;font-variant-numeric:tabular-nums}
+.prog{height:6px;border-radius:9px;background:var(--line);overflow:hidden;margin:8px 0 10px}
+.prog i{display:block;height:100%;width:0;background:var(--sign);transition:width .3s}
+.mainact{display:flex;gap:8px}
+.status{font-size:.88rem;color:var(--muted);margin:8px 0 0;min-height:0}
+.status:empty{display:none}
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;min-height:46px;padding:10px 16px;font:700 1rem var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;color:var(--ink);background:var(--surface-2)}
+.btn.block{flex:1;width:100%}
 .btn.primary{background:var(--sign);color:var(--sign-ink)}
-.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-.btn.amber{background:var(--amber);color:#1C1404}
+.btn.amber{background:var(--amber);color:var(--amber-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line)}
+.btn.ok{background:var(--ok);color:#fff}
+.btn.fail{background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger)}
 .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
-.btn:disabled{opacity:.5;cursor:default}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn.big{min-height:56px;font-size:1.12rem;border-radius:14px}
+.btn.sm{min-height:36px;padding:6px 12px;font-size:.9rem;border-radius:10px}
+.btn:disabled{opacity:.55;cursor:default}
+.iconbtn{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;cursor:pointer;flex:none;color:var(--ink);text-decoration:none}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--amber);outline-offset:1px}
+/* ---------- stop list ---------- */
+.lbl{font:700 .78rem var(--font-display);letter-spacing:.5px;color:var(--muted);margin:14px 0 6px}
+ol.stops{list-style:none;margin:0;padding:0}
+.stop{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer;background:var(--surface);position:relative}
+.stop:last-child{border-bottom:0}
+.stop.dragging{z-index:3;box-shadow:var(--shadow);border-radius:12px;padding-inline:8px;margin-inline:-8px}
+.stop.shift{transition:transform .15s}
+.num{width:34px;height:34px;border-radius:50%;background:var(--sign);color:var(--sign-ink);display:grid;place-items:center;font:800 .95rem var(--font-display);font-variant-numeric:tabular-nums;flex:none;margin-top:2px}
+.stop.next .num{background:var(--amber);color:var(--amber-ink)}
+.stop.pick .num{border-radius:9px}
+.stop.done .num{background:var(--done)}
+.stop.failed .num{background:var(--danger)}
+.sbody{flex:1;min-width:0}
+.saddr{font:700 1.04rem var(--font-display);overflow-wrap:anywhere}
+.stop.done .saddr{color:var(--muted)}
+.ssub{color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.chip{display:inline-flex;align-items:center;gap:4px;font:700 .76rem var(--font-body);border-radius:7px;padding:2px 8px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-variant-numeric:tabular-nums}
+.chip .i{width:13px;height:13px}
+.chip.urgent{background:var(--danger);border-color:var(--danger);color:#fff}
+.chip.eta{background:var(--sign-soft);border-color:transparent;color:var(--ink)}
+.chip.late{background:var(--amber-soft);border-color:var(--amber)}
+.chip.fail{color:var(--danger);border-color:var(--danger);background:var(--danger-soft)}
+.chip.ok{color:var(--ok);border-color:var(--ok);background:var(--sign-soft)}
+.chip.warn{color:var(--danger);border-color:transparent;background:transparent;padding-inline:0}
+.grip{width:40px;height:44px;border:0;background:transparent;display:grid;place-items:center;color:var(--muted);cursor:grab;touch-action:none;flex:none;margin-inline-end:-8px}
+.empty{padding:24px 6px;text-align:center;color:var(--muted)}
+.empty .btn{margin-top:12px}
+details.donebox{margin-top:10px}
+details.donebox>summary{cursor:pointer;font:700 .95rem var(--font-display);padding:10px 0;color:var(--muted);list-style:none}
+details.donebox>summary::before{content:"▸ ";}
+details.donebox[open]>summary::before{content:"▾ ";}
+.banner{background:var(--amber-soft);border:1px solid var(--amber);border-radius:12px;padding:10px 12px;font-size:.92rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.banner span{flex:1 1 180px}
+.banner.float{position:fixed;top:calc(var(--top) + 60px);inset-inline:68px 12px;z-index:16;box-shadow:var(--shadow);margin:0}
+/* ---------- driving card ---------- */
+.dcard{display:flex;flex-direction:column;gap:10px}
+.dtop{display:flex;gap:12px;align-items:flex-start}
+.dnum{width:46px;height:46px;border-radius:50%;background:var(--amber);color:var(--amber-ink);display:grid;place-items:center;font:800 1.2rem var(--font-display);flex:none}
+.dtt{flex:1;min-width:0}
+.dkicker{font:700 .78rem var(--font-display);color:var(--muted);letter-spacing:.4px}
+.daddr{font:800 1.35rem/1.2 var(--font-display);overflow-wrap:anywhere}
+.dsub{color:var(--muted);font-size:.92rem;font-variant-numeric:tabular-nums}
+.spot{display:flex;gap:10px;align-items:center;background:var(--amber-soft);border:1px solid var(--amber);border-radius:12px;padding:10px 12px;font-weight:700}
+.spot .i{width:24px;height:24px}
+.spot.hot{animation:pulse 1s 3}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(227,155,18,.35)}}
+.contact{display:flex;gap:8px;align-items:center}
+.contact .who2{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.note{background:var(--surface-2);border-radius:10px;padding:8px 10px;font-size:.95rem;overflow-wrap:anywhere}
+.dact{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dmore{display:flex;gap:6px;flex-wrap:wrap;justify-content:space-between}
+.dmore .btn{flex:1 1 auto}
+.finish{text-align:center;padding:6px 0}
+.finish h2{font:800 1.4rem var(--font-display);margin:0 0 4px}
+.stats{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+.stats div{background:var(--surface-2);border-radius:12px;padding:8px 14px;min-width:88px}
+.stats b{display:block;font:800 1.3rem var(--font-display);font-variant-numeric:tabular-nums}
+.stats small{color:var(--muted)}
+/* ---------- modal sheets & drawer ---------- */
+#scrim{position:fixed;inset:0;background:rgba(10,20,15,.42);z-index:30}
+.msheet{position:fixed;inset-inline:0;bottom:0;z-index:31;background:var(--surface);border-radius:20px 20px 0 0;max-height:calc(100vh - var(--top) - 118px);max-height:calc(100dvh - var(--top) - 118px);overflow:auto;padding:6px 16px calc(env(safe-area-inset-bottom,0px) + 20px);box-shadow:var(--shadow);max-width:720px;margin-inline:auto;overscroll-behavior:contain}
+.msheet .grab{position:sticky;top:-6px;background:var(--surface);z-index:2;margin:0 -16px}
+.mhead{display:flex;align-items:center;gap:10px;margin:2px 0 12px}
+.mhead h2{flex:1;margin:0;font:800 1.2rem var(--font-display);overflow-wrap:anywhere}
+.drawer{position:fixed;top:0;bottom:0;right:0;z-index:31;width:min(360px,88vw);background:var(--surface);overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 28px;box-shadow:var(--shadow)}
+.dr-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.dr-head img{width:44px;height:44px;border-radius:12px}
+.dr-head div{flex:1}
+.dr-head b{font:800 1.15rem var(--font-display)}
+.dr-sec{border-top:1px solid var(--line);padding:12px 0}
+.dr-sec h3,.dr-sec>summary{font:700 .8rem var(--font-display);letter-spacing:.5px;color:var(--muted);margin:0 0 8px;cursor:pointer}
+.mi{display:flex;align-items:center;gap:12px;width:100%;border:0;background:transparent;padding:11px 4px;text-align:start;font:600 1rem var(--font-body);cursor:pointer;border-radius:10px;text-decoration:none;color:var(--ink)}
+.mi:hover{background:var(--surface-2)}
+.mi .i{color:var(--sign)}
+.mi.danger,.mi.danger .i{color:var(--danger)}
+.who{display:flex;flex-direction:column;gap:8px;padding-bottom:12px}
+.who .row{display:flex;gap:8px;flex-wrap:wrap}
+.shiftbtn.on{background:var(--amber)!important;color:var(--amber-ink)!important}
+/* ---------- forms ---------- */
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted);font-weight:600;margin-bottom:10px}
+input[type=text],input[type=tel],input[type=number],input[type=password],input[type=time],textarea,select{width:100%;font:400 1rem var(--font-body);color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px}
+textarea{min-height:110px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1 1 140px;min-width:0}
+.chk{display:flex;align-items:center;gap:8px;font-size:.95rem;color:var(--ink);font-weight:600;margin-bottom:10px;cursor:pointer}
+.chk input{width:20px;height:20px}
+.seg{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.seg button{flex:1 1 auto;min-height:40px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 10px;font:600 .92rem var(--font-body);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--sign);border-color:var(--sign);color:var(--sign-ink)}
+.seglbl{font-size:.85rem;color:var(--muted);font-weight:600;margin:0 0 6px}
+.qact{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 14px;padding:0 16px 4px}
+.qact .btn{flex:none}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tab{flex:1 1 0;min-width:76px;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 6px;font:600 .95rem var(--font-body);cursor:pointer}
+.tab[aria-selected="true"]{background:var(--sign);border-color:var(--sign);color:var(--sign-ink)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .hint{font-size:.85rem;color:var(--muted);margin:8px 0 0}
 .preview{margin-top:10px;max-height:220px;overflow:auto;border-top:1px dashed var(--line);padding-top:8px;font-size:.92rem}
 .preview div{padding:3px 0;border-bottom:1px solid var(--line)}
 .preview small{color:var(--muted)}
-.start{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
-.start>label{flex:1 1 220px}
-.banner{background:var(--amber-soft);border:1px solid var(--amber);border-radius:10px;padding:10px 12px;font-size:.92rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.banner span{flex:1 1 200px}
-.status{font-size:.9rem;color:var(--muted);min-height:1.2em;margin-top:8px}
-ol.stops{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-.stop{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
-.stop.next{border:2px solid var(--amber);box-shadow:0 0 0 4px var(--amber-soft)}
-.stop.done{opacity:.62}
-.stop.done .addr{text-decoration:line-through;text-decoration-color:var(--done)}
-.num{grid-row:span 3;width:38px;height:38px;border-radius:9px;background:var(--sign);color:var(--sign-ink);display:grid;place-items:center;font:800 1.05rem var(--font-display);font-variant-numeric:tabular-nums}
-.stop.next .num{background:var(--amber);color:#1C1404}
-.stop.done .num{background:var(--done)}
-.addr{font:700 1.08rem var(--font-display);min-width:0;overflow-wrap:anywhere}
-.meta{font-size:.9rem;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;min-width:0}
-.meta b{color:var(--ink);font-weight:600}
-.tag{font:700 .72rem var(--font-display);letter-spacing:.5px;color:#1C1404;background:var(--amber);border-radius:6px;padding:1px 7px;margin-inline-start:6px;vertical-align:middle}
-.sactions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-.sactions .btn{padding:9px 12px;font-size:.92rem}
-.sm{padding:7px 10px!important;font-size:.85rem!important}
-.edit{grid-column:1/-1;display:flex;flex-direction:column;gap:6px;margin-top:6px}
-.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
-.routebar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 12px}
-.copyout{width:100%;min-height:120px;margin-top:8px}
-.geo{font-weight:600;color:var(--muted)}
-.geo.bad{color:var(--danger)}
 .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .thumbs img{width:72px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--line);max-width:100%}
-@media (prefers-reduced-motion:no-preference){.stop{transition:opacity .2s,border-color .2s}}
+.photo{max-width:100%;max-height:240px;border-radius:12px;border:1px solid var(--line);display:block;margin:8px 0}
+.sig{width:100%;height:170px;border:1px dashed var(--muted);border-radius:12px;background:#fff;touch-action:none;display:block}
+.pod{background:var(--sign-soft);border-radius:12px;padding:10px 12px;margin-bottom:12px}
+.pod.f{background:var(--danger-soft)}
+.copyout{width:100%;min-height:110px;margin-top:8px}
+.crew{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.crew>div{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.crew b{flex:1 1 140px}
+.hist{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.hist summary{cursor:pointer;font-weight:700}
+.hist ol{margin:8px 0 0;padding-inline-start:20px;font-size:.92rem}
+/* ---------- toast ---------- */
+#toast{position:fixed;inset-inline:12px;bottom:min(calc(var(--sv,300px) + 10px),calc(100vh - 190px));z-index:40;background:#14201A;color:#fff;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:var(--shadow);max-width:560px;margin-inline:auto}
+#toast span{flex:1}
+#toast button{background:transparent;border:0;color:#FFD27A;font:800 .95rem var(--font-body);cursor:pointer;padding:4px 6px}
+/* ---------- login gate ---------- */
 #gate{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;padding:24px 16px}
 #gate .card{max-width:420px;margin:6vh auto 0;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}
 #gate h2{font:800 1.4rem var(--font-display);margin:0 0 6px}
@@ -105,201 +241,221 @@ ol.stops{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;g
 #gate .err{color:var(--danger);font-weight:600;min-height:1.2em}
 #gate .swap{background:none;border:0;color:var(--sign);font:700 .95rem var(--font-body);cursor:pointer;margin-top:10px;padding:6px 0}
 .logo{width:56px;height:56px;border-radius:14px;display:block;margin-bottom:10px}
-.who{display:flex;gap:6px;align-items:center;font-size:.85rem;opacity:.95}
-.who button,.who a{background:rgba(255,255,255,.18);color:var(--sign-ink);border:0;border-radius:8px;padding:5px 9px;font:700 .8rem var(--font-body);cursor:pointer;text-decoration:none}
-.shiftbtn{border:2px solid var(--sign-ink)!important;background:transparent!important}
-.shiftbtn.on{background:var(--amber)!important;color:#1C1404!important;border-color:var(--amber)!important}
-input[type=password]{width:100%;font:400 1rem var(--font-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.chip{font:700 .78rem var(--font-body);border-radius:6px;padding:1px 8px;background:var(--bg);border:1px solid var(--line);color:var(--ink)}
-.chip.urgent{background:var(--danger);border-color:var(--danger);color:#fff}
-.chip.eta{background:var(--amber-soft);border-color:var(--amber)}
-.chip.fail{color:var(--danger);border-color:var(--danger)}
-.stop.failed .addr{text-decoration:line-through;text-decoration-color:var(--danger)}
-#mapBox{height:360px;border-radius:var(--r);border:1px solid var(--line);margin-bottom:12px;overflow:hidden}
-.pin{width:28px;height:28px;border-radius:50%;background:#0B6B3A;color:#fff;display:grid;place-items:center;font:800 13px/1 Rubik,Assistant,sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
-.pin.next{background:#E39B12;color:#1C1404}.pin.done{background:#97A69D}.pin.s{background:#15201A}.pin.urg{background:#B3261E}
-details.mgr>summary{cursor:pointer;font:700 1rem var(--font-display);padding:4px 0}
-.crew{display:flex;flex-direction:column;gap:8px;margin-top:10px}
-.crew>div{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.crew b{flex:1 1 140px}
-.chk{display:flex;align-items:center;gap:6px;font-size:.9rem;color:var(--ink);font-weight:600}
-input[type=time]{font:400 1rem var(--font-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%}
+@media (min-width:900px){ .sheet{inset-inline:16px auto;width:420px;margin:0} .topbar{inset-inline:12px auto;width:min(560px,calc(100vw - 24px))} .suggest{inset-inline:12px auto;width:min(560px,calc(100vw - 24px))} .msheet{border-radius:20px;bottom:16px} #toast{inset-inline:16px auto;width:420px;margin:0} }
+@media (prefers-reduced-motion:reduce){ .sheet.anim,.prog i,.stop.shift{transition:none} .spot.hot{animation:none} }
 </style>
 </head>
 <body>
 
 <div id="gate" hidden><div class="card" id="gateCard"></div></div>
-<div class="wrap">
-  <header class="top">
-    <div>
-      <h1>מסלול שליח</h1>
-      <div class="date" id="today"></div>
-    </div>
-    <div class="who" id="who" hidden>
-      <button type="button" id="shiftBtn" class="shiftbtn">התחל משמרת</button>
-      <span id="whoName"></span>
-      <a id="adminLink" href="admin.html" hidden>פאנל מנהל</a>
-      <button type="button" id="logoutBtn">יציאה</button>
-    </div>
-    <div class="progress" aria-live="polite"><span id="progTxt">0/0 נמסרו</span><span class="bar"><i id="progBar"></i></span></div>
-  </header>
 
-  <div id="exampleBanner" class="banner" hidden style="margin-top:14px">
-    <span>זה מסלול לדוגמה כדי לראות איך זה עובד. הכתובות לא אמיתיות.</span>
-    <button class="btn ghost sm" id="clearExample" type="button">נקה והתחל מסלול שלי</button>
-  </div>
+<div id="map" role="region" aria-label="מפת המסלול"></div>
 
-  <div id="installBanner" class="banner" hidden style="margin-top:14px">
-    <span id="installTxt">אפשר להתקין את מסלול שליח כאפליקציה על המסך הראשי.</span>
-    <button class="btn primary sm" id="installBtn" type="button" hidden>התקן</button>
-    <button class="btn ghost sm" id="installClose" type="button">סגור</button>
-  </div>
+<header class="topbar">
+  <button class="fab" id="menuBtn" type="button" aria-label="תפריט" aria-controls="menu"></button>
+  <form class="search" id="searchForm" role="search" autocomplete="off">
+    <span class="i" data-i="search"></span>
+    <input id="q" type="text" placeholder="הוספת עצירה – כתובת" aria-label="הוספת עצירה לפי כתובת" enterkeyhint="done" autocomplete="off">
+    <button type="button" id="micBtn" aria-label="הקלטת כתובת בקול" hidden><span class="i" data-i="mic"></span></button>
+    <button type="button" id="impBtn2" aria-label="ייבוא כתובות"><span class="i" data-i="plus"></span></button>
+  </form>
+</header>
+<div id="suggest" class="suggest" hidden role="listbox" aria-label="הצעות כתובת"></div>
 
-  <section aria-labelledby="startLbl">
-    <p class="label" id="startLbl">נקודת יציאה ועיר ברירת מחדל</p>
-    <div class="panel start">
-      <label class="f" for="startAddr">יוצאים מ־
-        <input type="text" id="startAddr" placeholder="למשל: הדקלים 104, פרדס חנה-כרכור" autocomplete="off">
-      </label>
-      <label class="f" for="defCity">עיר, אם לא כתובה בכתובת
-        <input type="text" id="defCity" placeholder="פרדס חנה-כרכור" autocomplete="off">
-      </label>
-      <label class="f" for="endMode">איפה מסיימים
-        <select id="endMode"><option value="none">בעצירה האחרונה</option><option value="start">חוזרים לנקודת היציאה</option><option value="custom">בכתובת אחרת</option></select>
-      </label>
-      <label class="f" for="endAddr" id="endAddrLbl" hidden>כתובת סיום
-        <input type="text" id="endAddr" placeholder="למשל: הבית" autocomplete="off">
-      </label>
-      <label class="f" for="departAt">שעת יציאה (ריק = עכשיו)
-        <input type="time" id="departAt">
-      </label>
-      <label class="f" for="courierName">שם השליח
-        <input type="text" id="courierName" placeholder="השם שלך – מופיע בדיווח למנהל" autocomplete="off">
-      </label>
-    </div>
-  </section>
-
-  <section aria-labelledby="addLbl">
-    <p class="label" id="addLbl">הוספת כתובות</p>
-    <div class="panel">
-      <div class="tabs" role="tablist">
-        <button class="tab" role="tab" id="tab-wa" aria-controls="pane-wa" aria-selected="true" type="button">מוואטסאפ</button>
-        <button class="tab" role="tab" id="tab-img" aria-controls="pane-img" aria-selected="false" type="button">מצילום</button>
-        <button class="tab" role="tab" id="tab-xl" aria-controls="pane-xl" aria-selected="false" type="button">מאקסל</button>
-        <button class="tab" role="tab" id="tab-man" aria-controls="pane-man" aria-selected="false" type="button">ידני</button>
-      </div>
-      <p class="status" id="addMsg" role="status" aria-live="polite"></p>
-
-      <div id="pane-wa" role="tabpanel" aria-labelledby="tab-wa">
-        <label class="f" for="waText">מדביקים כאן את ההודעה או כמה הודעות מהקבוצה. כל כתובת בשורה משלה. אפשר לכתוב בשורה "דחוף", "אחרי 16:00" או "עד 12:00".
-          <textarea id="waText" placeholder="[10.10.2026, 08:12] גיא: הרצל 12 חדרה 052-1234567&#10;מיכל לוי – הנשיא 7, בנימינה&#10;3. דרך הבנים 40 פרדס חנה"></textarea>
-        </label>
-        <div class="actions">
-          <button class="btn primary" id="waParse" type="button">זהה כתובות</button>
-          <button class="btn ghost" id="waAi" type="button" hidden>זיהוי חכם (הודעה מבולגנת)</button>
-        </div>
-        <div id="waPreview" class="preview" hidden></div>
-        <div class="actions" id="waAddRow" hidden><button class="btn amber" id="waAdd" type="button">הוסף למסלול</button></div>
-      </div>
-
-      <div id="pane-img" role="tabpanel" aria-labelledby="tab-img" hidden>
-        <div class="actions" style="margin-top:0">
-          <button class="btn amber" id="camBtn" type="button">📷 צלם מסמך עם כתובות</button>
-        </div>
-        <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
-        <p class="hint" style="margin:6px 0 10px">מצלמים דף, תעודת משלוח או רשימה מודפסת. אפשר לצלם כמה דפים ברצף – כל צילום מתווסף.</p>
-        <label class="f" for="imgFile">או בחר צילום מסך / תמונה מהגלריה / קובץ PDF (הזמנה, רשימה או הודעה). אפשר כמה ביחד.
-          <input type="file" id="imgFile" accept="image/*,.heic,.heif,.pdf,application/pdf" multiple>
-        </label>
-        <div id="imgThumbs" class="thumbs" hidden></div>
-        <div class="actions">
-          <button class="btn primary" id="imgParse" type="button" disabled>קרא כתובות מהתמונה</button>
-          <button class="btn ghost" id="imgAi" type="button" hidden disabled>קריאה מדויקת עם Claude</button>
-          <button class="btn ghost" id="imgClear" type="button" hidden>נקה תמונות</button>
-        </div>
-        <p class="hint" id="imgHint">הקריאה נעשית כאן בטלפון, בלי לשלוח את התמונה לשום מקום. בפעם הראשונה זה לוקח כמה שניות. לפני ההוספה תוכל לבדוק מה זוהה.</p>
-        <div id="imgPreview" class="preview" hidden></div>
-        <div class="actions" id="imgAddRow" hidden><button class="btn amber" id="imgAdd" type="button">הוסף למסלול</button></div>
-      </div>
-
-      <div id="pane-xl" role="tabpanel" aria-labelledby="tab-xl" hidden>
-        <label class="f" for="xlFile">קובץ אקסל, CSV או PDF עם כתובות (גם מוואטסאפ או מהמייל)
-          <input type="file" id="xlFile" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/plain,application/pdf">
-        </label>
-        <div id="xlMap" hidden>
-          <div class="row" style="margin-top:10px">
-            <label class="f" for="mAddr">עמודת כתובת / רחוב<select id="mAddr"></select></label>
-            <label class="f" for="mNum">מספר בית<select id="mNum"></select></label>
-            <label class="f" for="mCity">עיר<select id="mCity"></select></label>
-          </div>
-          <div class="row" style="margin-top:8px">
-            <label class="f" for="mName">שם לקוח<select id="mName"></select></label>
-            <label class="f" for="mPhone">טלפון<select id="mPhone"></select></label>
-            <label class="f" for="mNote">הערה<select id="mNote"></select></label>
-          </div>
-          <div id="xlPreview" class="preview"></div>
-          <div class="actions"><button class="btn amber" id="xlAdd" type="button">הוסף למסלול</button></div>
-        </div>
-        <p class="hint">הקובץ נקרא רק כאן בדפדפן ולא נשלח לשום מקום.</p>
-      </div>
-
-      <div id="pane-man" role="tabpanel" aria-labelledby="tab-man" hidden>
-        <form id="manForm">
-          <div class="row">
-            <label class="f" for="manAddr">כתובת (רחוב ומספר)<input type="text" id="manAddr" required autocomplete="off"></label>
-            <label class="f" for="manCity">עיר<input type="text" id="manCity" autocomplete="off" placeholder="ריק = עיר ברירת המחדל"></label>
-          </div>
-          <div class="row" style="margin-top:8px">
-            <label class="f" for="manName">שם<input type="text" id="manName" autocomplete="off"></label>
-            <label class="f" for="manPhone">טלפון<input type="tel" id="manPhone" autocomplete="off"></label>
-            <label class="f" for="manNote">הערה<input type="text" id="manNote" autocomplete="off" placeholder="קומה, קוד, להשאיר ליד הדלת"></label>
-          </div>
-          <div class="row" style="margin-top:8px;align-items:end">
-            <label class="chk" for="manUrgent"><input type="checkbox" id="manUrgent"> דחוף – בהתחלה</label>
-            <label class="f" for="manAfter">לא לפני<input type="time" id="manAfter"></label>
-            <label class="f" for="manBefore">עד השעה<input type="time" id="manBefore"></label>
-          </div>
-          <div class="actions"><button class="btn amber" type="submit">הוסף עצירה</button></div>
-        </form>
-      </div>
-    </div>
-  </section>
-
-  <section aria-labelledby="routeLbl">
-    <p class="label" id="routeLbl">המסלול</p>
-    <div class="routebar">
-      <button class="btn primary" id="orderGeo" type="button">סדר מסלול קצר</button>
-      <button class="btn ghost" id="orderBasic" type="button">סדר לפי עיר ורחוב</button>
-      <button class="btn ghost" id="mapBtn" type="button">מפה</button>
-      <button class="btn ghost" id="openGmaps" type="button">כל המסלול בגוגל מפות</button>
-      <button class="btn ghost" id="copyWa" type="button">העתק לוואטסאפ</button>
-      <button class="btn danger" id="clearAll" type="button">נקה הכל</button>
-    </div>
-    <div class="status" id="status" role="status"></div>
-    <div id="mapBox" hidden></div>
-    <div id="gmapsLinks" class="actions" hidden></div>
-    <p class="hint">נתוני מפה: © OpenStreetMap contributors</p>
-    <textarea id="copyOut" class="copyout" hidden readonly aria-label="טקסט להעתקה"></textarea>
-    <ol class="stops" id="stops"></ol>
-  </section>
-
-  <section aria-labelledby="mgrLbl">
-    <p class="label" id="mgrLbl">למנהל</p>
-    <details class="panel mgr" id="mgr">
-      <summary>חלוקת המשלוחים בין כמה שליחים</summary>
-      <p class="hint">מכניסים למעלה את כל המשלוחים של היום, כותבים כאן את שמות השליחים, והאפליקציה מחלקת לפי אזורים. כל שליח מקבל לינק בוואטסאפ שהמסלול שלו כבר בתוכו.</p>
-      <label class="f" for="crewNames" style="margin-top:10px">שמות השליחים, מופרדים בפסיק
-        <input type="text" id="crewNames" placeholder="יונתן, יצחק, חיים" autocomplete="off">
-      </label>
-      <div class="actions"><button class="btn primary" id="splitBtn" type="button">חלק את המשלוחים</button></div>
-      <div id="crewOut" class="crew" hidden></div>
-      <p class="hint" id="trackHint"></p>
-    </details>
-  </section>
+<div class="mapctl">
+  <button class="fab" id="locBtn" type="button" aria-label="המיקום שלי"><span class="i" data-i="locate"></span></button>
+  <button class="fab" id="fitBtn" type="button" aria-label="הצג את כל המסלול"><span class="i" data-i="fit"></span></button>
+  <button class="fab" id="layerBtn" type="button" aria-label="מפת לוויין" aria-pressed="false"><span class="i" data-i="layers"></span></button>
 </div>
+
+<div id="installBanner" class="banner float" hidden>
+  <span id="installTxt">אפשר להתקין את מסלול שליח כאפליקציה על המסך הראשי.</span>
+  <button class="btn primary sm" id="installBtn" type="button" hidden>התקן</button>
+  <button class="btn ghost sm" id="installClose" type="button">סגור</button>
+</div>
+
+<section id="sheet" class="sheet" aria-label="המסלול">
+  <div class="grab" id="grab" role="button" tabindex="0" aria-label="הגדל או הקטן את רשימת העצירות"><span></span></div>
+  <div class="sheet-head" id="sheetHead">
+    <div id="planHead">
+      <div class="sum"><b id="sumStops">0 עצירות</b><span id="sumMeta"></span></div>
+      <div class="prog" aria-hidden="true"><i id="progBar"></i></div>
+      <div class="mainact">
+        <button class="btn primary block big" id="mainBtn" type="button"></button>
+        <button class="iconbtn" id="importBtn" type="button" aria-label="ייבוא כתובות" style="width:56px;height:56px"><span class="i" data-i="plus"></span></button>
+      </div>
+    </div>
+    <div id="driveHead" hidden></div>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </div>
+  <div class="sheet-body" id="sheetBody">
+    <div id="exampleBanner" class="banner" hidden>
+      <span>זה מסלול לדוגמה כדי לראות איך זה עובד. הכתובות לא אמיתיות.</span>
+      <button class="btn ghost sm" id="clearExample" type="button">נקה והתחל מסלול שלי</button>
+    </div>
+    <p class="lbl" id="listLbl"></p>
+    <ol class="stops" id="stops"></ol>
+    <details class="donebox" id="doneBox" hidden><summary id="doneSum"></summary><ol class="stops" id="doneList"></ol></details>
+  </div>
+</section>
+
+<div id="scrim" hidden></div>
+
+<!-- menu -->
+<aside id="menu" class="drawer" hidden aria-label="תפריט" role="dialog">
+  <div class="dr-head">
+    <img src="icon-192.png" alt="">
+    <div><b>מסלול שליח</b><div class="hint" id="today" style="margin:0"></div></div>
+    <button class="iconbtn" type="button" data-close aria-label="סגור"><span class="i" data-i="x"></span></button>
+  </div>
+  <div class="who" id="who" hidden>
+    <b id="whoName"></b>
+    <div class="row">
+      <button type="button" id="shiftBtn" class="btn primary shiftbtn">התחל משמרת</button>
+      <a id="adminLink" href="admin.html" class="btn ghost" hidden>פאנל מנהל</a>
+      <button type="button" id="logoutBtn" class="btn ghost">יציאה</button>
+    </div>
+  </div>
+  <div class="dr-sec">
+    <h3>המסלול</h3>
+    <button class="mi" type="button" id="mImport"><span class="i" data-i="plus"></span>ייבוא כתובות (וואטסאפ, צילום, אקסל)</button>
+    <button class="mi" type="button" id="mReopt"><span class="i" data-i="spark"></span>אופטימיזציה מחדש</button>
+    <button class="mi" type="button" id="mReverse"><span class="i" data-i="swap"></span>הפוך את סדר המסלול</button>
+    <button class="mi" type="button" id="orderBasic"><span class="i" data-i="list"></span>סדר לפי עיר ורחוב</button>
+    <button class="mi" type="button" id="openGmaps"><span class="i" data-i="nav"></span>כל המסלול בגוגל מפות</button>
+    <div id="gmapsLinks" class="actions" hidden style="margin:0 0 8px"></div>
+    <button class="mi" type="button" id="copyWa"><span class="i" data-i="msg"></span>העתק את המסלול לוואטסאפ</button>
+    <textarea id="copyOut" class="copyout" hidden readonly aria-label="טקסט להעתקה"></textarea>
+    <button class="mi" type="button" id="mHistory"><span class="i" data-i="clock"></span>מסלולים קודמים</button>
+    <button class="mi danger solo" type="button" id="mNew"><span class="i" data-i="trash"></span>מסלול חדש (ניקוי)</button>
+  </div>
+  <div class="dr-sec">
+    <h3>הגדרות</h3>
+    <label class="f" for="startAddr">יוצאים מ־
+      <input type="text" id="startAddr" placeholder="למשל: הדקלים 104, פרדס חנה-כרכור" autocomplete="off"></label>
+    <label class="f" for="defCity">עיר, אם לא כתובה בכתובת
+      <input type="text" id="defCity" placeholder="פרדס חנה-כרכור" autocomplete="off"></label>
+    <label class="f" for="endMode">איפה מסיימים
+      <select id="endMode"><option value="none">בעצירה האחרונה</option><option value="start">חוזרים לנקודת היציאה</option><option value="custom">בכתובת אחרת</option></select></label>
+    <label class="f" for="endAddr" id="endAddrLbl" hidden>כתובת סיום
+      <input type="text" id="endAddr" placeholder="למשל: הבית" autocomplete="off"></label>
+    <div class="row">
+      <label class="f" for="departAt">שעת יציאה (ריק = עכשיו)<input type="time" id="departAt"></label>
+      <label class="f" for="svcMin">דקות בכל עצירה<input type="number" id="svcMin" min="0" max="60" step="1" inputmode="numeric"></label>
+    </div>
+    <label class="f solo" for="courierName">שם השליח
+      <input type="text" id="courierName" placeholder="השם שלך – מופיע בדיווח למנהל" autocomplete="off"></label>
+    <label class="f" for="navApp">אפליקציית ניווט
+      <select id="navApp"><option value="waze">Waze</option><option value="gmaps">גוגל מפות</option><option value="apple">מפות של אפל</option></select></label>
+    <label class="chk" for="autoNav"><input type="checkbox" id="autoNav"> לפתוח ניווט לעצירה הבאה מיד אחרי סימון</label>
+    <label class="chk" for="needPhoto"><input type="checkbox" id="needPhoto"> לבקש צילום בכל מסירה</label>
+  </div>
+  <details class="dr-sec solo" id="mgr">
+    <summary>למנהל: חלוקת המשלוחים בין כמה שליחים</summary>
+    <p class="hint">מכניסים את כל המשלוחים של היום, כותבים כאן את שמות השליחים, והאפליקציה מחלקת לפי אזורים. כל שליח מקבל לינק בוואטסאפ שהמסלול שלו כבר בתוכו.</p>
+    <label class="f" for="crewNames" style="margin-top:10px">שמות השליחים, מופרדים בפסיק
+      <input type="text" id="crewNames" placeholder="יונתן, יצחק, חיים" autocomplete="off"></label>
+    <button class="btn primary" id="splitBtn" type="button">חלק את המשלוחים</button>
+    <div id="crewOut" class="crew" hidden></div>
+    <p class="hint" id="trackHint"></p>
+  </details>
+  <div class="dr-sec">
+    <a class="mi" href="classic.html"><span class="i" data-i="undo"></span>הגרסה הקודמת של האפליקציה</a>
+    <p class="hint">נתוני מפה: © OpenStreetMap contributors</p>
+  </div>
+</aside>
+
+<!-- import addresses -->
+<div class="msheet" id="importSheet" hidden role="dialog" aria-labelledby="impTitle">
+  <div class="grab"><span></span></div>
+  <div class="mhead"><h2 id="impTitle">הוספת כתובות</h2><button class="iconbtn" type="button" data-close aria-label="סגור"><span class="i" data-i="x"></span></button></div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-wa" aria-controls="pane-wa" aria-selected="true" type="button">וואטסאפ</button>
+    <button class="tab" role="tab" id="tab-img" aria-controls="pane-img" aria-selected="false" type="button">צילום</button>
+    <button class="tab" role="tab" id="tab-xl" aria-controls="pane-xl" aria-selected="false" type="button">אקסל</button>
+    <button class="tab" role="tab" id="tab-man" aria-controls="pane-man" aria-selected="false" type="button">ידני</button>
+  </div>
+  <p class="status" id="addMsg" role="status" aria-live="polite"></p>
+
+  <div id="pane-wa" role="tabpanel" aria-labelledby="tab-wa">
+    <label class="f" for="waText">מדביקים כאן הודעה או כמה הודעות מהקבוצה. כל כתובת בשורה משלה. אפשר לכתוב בשורה "דחוף", "אחרי 16:00" או "עד 12:00".
+      <textarea id="waText" placeholder="[10.10.2026, 08:12] גיא: הרצל 12 חדרה 052-1234567&#10;מיכל לוי – הנשיא 7, בנימינה&#10;3. דרך הבנים 40 פרדס חנה"></textarea></label>
+    <div class="actions">
+      <button class="btn primary" id="waParse" type="button">זהה כתובות</button>
+      <button class="btn ghost" id="waAi" type="button" hidden>זיהוי חכם (הודעה מבולגנת)</button>
+    </div>
+    <div id="waPreview" class="preview" hidden></div>
+    <div class="actions" id="waAddRow" hidden><button class="btn amber" id="waAdd" type="button">הוסף למסלול</button></div>
+  </div>
+
+  <div id="pane-img" role="tabpanel" aria-labelledby="tab-img" hidden>
+    <div class="actions" style="margin-top:0"><button class="btn amber" id="camBtn" type="button"><span class="i" data-i="camera"></span>צלם מסמך עם כתובות</button></div>
+    <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
+    <p class="hint" style="margin:6px 0 10px">מצלמים דף, תעודת משלוח או רשימה מודפסת. אפשר לצלם כמה דפים ברצף – כל צילום מתווסף.</p>
+    <label class="f" for="imgFile">או בחר צילום מסך / תמונה מהגלריה / קובץ PDF. אפשר כמה ביחד.
+      <input type="file" id="imgFile" accept="image/*,.heic,.heif,.pdf,application/pdf" multiple></label>
+    <div id="imgThumbs" class="thumbs" hidden></div>
+    <div class="actions">
+      <button class="btn primary" id="imgParse" type="button" disabled>קרא כתובות מהתמונה</button>
+      <button class="btn ghost" id="imgAi" type="button" hidden disabled>קריאה מדויקת עם Claude</button>
+      <button class="btn ghost" id="imgClear" type="button" hidden>נקה תמונות</button>
+    </div>
+    <p class="hint" id="imgHint">הקריאה נעשית כאן בטלפון, בלי לשלוח את התמונה לשום מקום. בפעם הראשונה זה לוקח כמה שניות.</p>
+    <div id="imgPreview" class="preview" hidden></div>
+    <div class="actions" id="imgAddRow" hidden><button class="btn amber" id="imgAdd" type="button">הוסף למסלול</button></div>
+  </div>
+
+  <div id="pane-xl" role="tabpanel" aria-labelledby="tab-xl" hidden>
+    <label class="f" for="xlFile">קובץ אקסל, CSV או PDF עם כתובות
+      <input type="file" id="xlFile" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/plain,application/pdf"></label>
+    <div id="xlMap" hidden>
+      <div class="row">
+        <label class="f" for="mAddr">עמודת כתובת / רחוב<select id="mAddr"></select></label>
+        <label class="f" for="mNum">מספר בית<select id="mNum"></select></label>
+        <label class="f" for="mCity">עיר<select id="mCity"></select></label>
+      </div>
+      <div class="row">
+        <label class="f" for="mName">שם לקוח<select id="mName"></select></label>
+        <label class="f" for="mPhone">טלפון<select id="mPhone"></select></label>
+        <label class="f" for="mNote">הערה<select id="mNote"></select></label>
+      </div>
+      <div id="xlPreview" class="preview"></div>
+      <div class="actions"><button class="btn amber" id="xlAdd" type="button">הוסף למסלול</button></div>
+    </div>
+    <p class="hint">הקובץ נקרא רק כאן בטלפון ולא נשלח לשום מקום.</p>
+  </div>
+
+  <div id="pane-man" role="tabpanel" aria-labelledby="tab-man" hidden>
+    <form id="manForm">
+      <div class="row">
+        <label class="f" for="manAddr">כתובת (רחוב ומספר)<input type="text" id="manAddr" required autocomplete="off"></label>
+        <label class="f" for="manCity">עיר<input type="text" id="manCity" autocomplete="off" placeholder="ריק = עיר ברירת המחדל"></label>
+      </div>
+      <div class="row">
+        <label class="f" for="manName">שם<input type="text" id="manName" autocomplete="off"></label>
+        <label class="f" for="manPhone">טלפון<input type="tel" id="manPhone" autocomplete="off"></label>
+      </div>
+      <label class="f" for="manNote">הערה<input type="text" id="manNote" autocomplete="off" placeholder="קומה, קוד, להשאיר ליד הדלת"></label>
+      <div class="row" style="align-items:end">
+        <label class="chk" for="manUrgent"><input type="checkbox" id="manUrgent"> דחוף – בהתחלה</label>
+        <label class="f" for="manAfter">לא לפני<input type="time" id="manAfter"></label>
+        <label class="f" for="manBefore">עד השעה<input type="time" id="manBefore"></label>
+      </div>
+      <div class="actions"><button class="btn amber" type="submit">הוסף עצירה</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- dynamic sheet: stop details, proof of delivery, history… -->
+<div class="msheet" id="dynSheet" hidden role="dialog" aria-modal="true"><div class="grab"><span></span></div><div id="dynBody"></div></div>
+
+<div id="toast" hidden role="status" aria-live="polite"><span id="toastTxt"></span><button type="button" id="toastBtn" hidden></button></div>
+<input type="file" id="podFile" accept="image/*" capture="environment" hidden>
+<input type="file" id="scanFile" accept="image/*" capture="environment" hidden>
 
 <script>
 (() => {
+"use strict";
 "use strict";
 const $ = s => document.querySelector(s);
 const KEY = "courier-route-v1";
@@ -311,6 +467,7 @@ const EXAMPLE = [
   {addr:"הגפן 8", city:"חדרה", name:"לקוח לדוגמה 5", phone:"", note:""}
 ];
 let state = load();
+if(state.dirty==null) state.dirty=!state.sum;
 
 function uid(){return Math.random().toString(36).slice(2,9)}
 function load(){
@@ -344,7 +501,6 @@ function full(st){
 function hasCity(a){ a=a||""; return /,/.test(a) || /\d+[א-ת]?\s+[א-תA-Za-z"'׳-]{2,}/.test(a); }
 function waze(q){ return "https://waze.com/ul?q="+encodeURIComponent(q)+"&navigate=yes"; }
 function gmaps(q){ return "https://www.google.com/maps/dir/?api=1&destination="+encodeURIComponent(q)+"&travelmode=driving"; }
-function setStatus(t){ $("#status").textContent=t||""; }
 function el(tag,attrs={},...kids){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(attrs)){
@@ -361,7 +517,6 @@ function copyText(text, fallbackEl){
   }catch(e){ showFallback(); }
   function showFallback(){ fallbackEl.hidden=false; fallbackEl.value=text; fallbackEl.focus(); fallbackEl.select(); setStatus("סמן והעתק את הטקסט שמתחת."); }
 }
-
 /* ---------- WhatsApp parsing ---------- */
 const PHONE_RE=/(?:\+?972[-\s]?|0)(?:5\d|[2-489]|7\d)[-\s]?\d{3}[-\s]?\d{4}/;
 function cleanLine(l){
@@ -484,16 +639,18 @@ function renderXlPreview(){
 function addStops(items){
   if(state.example){ state.stops=[]; state.example=false; }
   const seen=new Set(state.stops.map(s=>full(s)));
-  let added=0;
+  let added=0; const addedList=[];
   for(const it of items){
     const fl=parseFlags([it.addr,it.note,it.raw||""].join(" "));
     const st={id:uid(),addr:it.addr,city:it.city||"",name:it.name||"",phone:it.phone||"",note:cleanFlags(it.note||""),done:false,doneAt:null,
       urgent:!!(it.urgent||fl.urgent), after:it.after||fl.after||"", before:it.before||fl.before||""};
-    if(seen.has(full(st))) continue; seen.add(full(st)); state.stops.push(st); added++;
+    if(seen.has(full(st))) continue; seen.add(full(st)); state.stops.push(st); addedList.push(st); added++;
   }
+  if(added) state.dirty=true;
   save(); render(); if(ME) pull();
   const skipped=items.length-added;
   addMsg("נוספו "+added+" עצירות"+(skipped?" ("+skipped+" כפולות דולגו)":"")+".");
+  return addedList;
 }
 let waItems=[];
 function showWaPreview(items){
@@ -503,7 +660,6 @@ function showWaPreview(items){
   items.forEach(x=>p.append(el("div",{},x.addr+(x.city?", "+x.city:""),(x.name||x.phone)?el("small",{text:" · "+[x.name,x.phone].filter(Boolean).join(" · ")}):null)));
   $("#waAddRow").hidden=false;
 }
-
 /* ---------- map data & shortest route (runs on the phone) ---------- */
 let GEOP=null;
 function gnorm(t){
@@ -518,8 +674,8 @@ function loadGeo(){
     for(const [a,b] of Object.entries(CITY_ALIAS)){ const t=byName.get(gnorm(b)); if(t&&!byName.has(gnorm(a))) locs.push({n:gnorm(a),name:t.name,lat:t.lat,lon:t.lon}); }
     const uniq=d.loc.map(([n,lat,lon])=>({name:n,lat,lon}));
     locs.sort((a,b)=>b.n.length-a.n.length);
-    const st=new Map(); for(const [n,pts] of d.st){ const k=gnorm(n); st.set(k,(st.get(k)||[]).concat(pts)); }
-    return {locs,st,uniq};
+    const st=new Map(), disp=new Map(); for(const [n,pts] of d.st){ const k=gnorm(n); st.set(k,(st.get(k)||[]).concat(pts)); if(!disp.has(k)) disp.set(k,n); }
+    return {locs,st,uniq,disp};
   }).catch(()=>{ GEOP=null; return null; });
   return GEOP;
 }
@@ -621,7 +777,8 @@ async function preciseGeocode(G,text,defCity){
 
 /* ---------- shortest route: real road matrix + exact / heuristic solver ---------- */
 const ROUTERS=["https://router.project-osrm.org","https://routing.openstreetmap.de/routed-car"];
-const SVC=180; // seconds at each stop
+let SVC=180; // default seconds at each stop (setting)
+let SVN=[];   // per-node service seconds for the current solve
 async function roadMatrix(nodes){
   if(nodes.length>100) return null;
   const coords=nodes.map(p=>p.lon.toFixed(5)+","+p.lat.toFixed(5)).join(";");
@@ -656,7 +813,7 @@ function airMatrix(nodes){
 /* simulate a visit order: ids are node indexes, from node `from` at time t0 (sec of day). */
 function simulate(M,ids,from,end,t0,W){
   let t=t0, prev=from, late=0, drive=0;
-  for(const i of ids){ const d=M[prev][i]; drive+=d; t+=d; const w=W[i]; if(w){ if(w.a!=null&&t<w.a) t=w.a; if(w.b!=null&&t>w.b) late+=t-w.b; } t+=SVC; prev=i; }
+  for(const i of ids){ const d=M[prev][i]; drive+=d; t+=d; const w=W[i]; if(w){ if(w.a!=null&&t<w.a) t=w.a; if(w.b!=null&&t>w.b) late+=t-w.b; } t+=(SVN[i]??SVC); prev=i; }
   if(end>=0){ drive+=M[prev][end]; t+=M[prev][end]; }
   return {t,late,drive,cost:(t-t0)+30*late};
 }
@@ -694,7 +851,7 @@ function solveSet(M,set,from,end,t0,W){
     const dfs=(prev,t,late)=>{
       const partial=(t)+30*late; if(partial>=bc) return;
       if(ord.length===set.length){ const tt=t+(end>=0?M[prev][end]:0), c=tt+30*late; if(c<bc){ bc=c; best=ord.slice(); } return; }
-      for(const i of set){ if(used.has(i)) continue; let t2=t+M[prev][i]; const w=W[i]; let l2=late; if(w){ if(w.a!=null&&t2<w.a) t2=w.a; if(w.b!=null&&t2>w.b) l2+=t2-w.b; } t2+=SVC;
+      for(const i of set){ if(used.has(i)) continue; let t2=t+M[prev][i]; const w=W[i]; let l2=late; if(w){ if(w.a!=null&&t2<w.a) t2=w.a; if(w.b!=null&&t2>w.b) l2+=t2-w.b; } t2+=(SVN[i]??SVC);
         used.add(i); ord.push(i); dfs(i,t2,l2); ord.pop(); used.delete(i); }
     };
     dfs(from,t0,0); return best;
@@ -716,15 +873,16 @@ async function routeOrder(start,pts,end,t0){
   const mx=(await roadMatrix(nodes))||airMatrix(nodes);
   if(!start){ for(let j=0;j<nodes.length;j++){ mx.T[0][j]=0; mx.Dm[0][j]=0; } }
   const W={}; pts.forEach((p,i)=>{ const a=secOfDay(p.after), b=secOfDay(p.before); if(a!=null||b!=null) W[i+1]={a,b}; });
-  const ids=pts.map((_,i)=>i+1), urg=ids.filter(i=>pts[i-1].urgent), rest=ids.filter(i=>!pts[i-1].urgent);
-  let ord=[];
-  if(urg.length){ ord=solveSet(mx.T,urg,0,-1,t0,W); const last=ord[ord.length-1]; const t1=simulate(mx.T,ord,0,-1,t0,W).t; ord=ord.concat(solveSet(mx.T,rest,last,endIdx,t1,W)); }
-  else ord=solveSet(mx.T,rest,0,endIdx,t0,W);
+  SVN=[0,...pts.map(p=>p.svc??SVC)]; if(end) SVN.push(0);
+  const ids=pts.map((_,i)=>i+1), urg=ids.filter(i=>pts[i-1].urgent), lst=ids.filter(i=>!pts[i-1].urgent&&pts[i-1].last), rest=ids.filter(i=>!pts[i-1].urgent&&!pts[i-1].last);
+  let ord=[], cur=0, tc=t0;
+  const seg=(set,endI)=>{ if(!set.length) return; const o=solveSet(mx.T,set,cur,endI,tc,W); tc=simulate(mx.T,o,cur,-1,tc,W).t; cur=o[o.length-1]; ord=ord.concat(o); };
+  seg(urg,(rest.length||lst.length)?-1:endIdx); seg(rest,lst.length?-1:endIdx); seg(lst,endIdx);
   // timings
   let t=t0, prev=0, meters=0, drive=0, wait=0; const legs=[], etas=[], lates=[];
-  for(const i of ord){ const d=mx.T[prev][i]; meters+=mx.Dm[prev][i]; t+=d; drive+=d; { const w0=W[i]; if(w0&&w0.a!=null&&t<w0.a) wait+=w0.a-t; } const w=W[i]; if(w&&w.a!=null&&t<w.a) t=w.a; legs.push(d); etas.push(t); lates.push(!!(w&&w.b!=null&&t>w.b)); t+=SVC; prev=i; }
+  for(const i of ord){ const d=mx.T[prev][i]; meters+=mx.Dm[prev][i]; t+=d; drive+=d; { const w0=W[i]; if(w0&&w0.a!=null&&t<w0.a) wait+=w0.a-t; } const w=W[i]; if(w&&w.a!=null&&t<w.a) t=w.a; legs.push(d); etas.push(t); lates.push(!!(w&&w.b!=null&&t>w.b)); t+=(SVN[i]??SVC); prev=i; }
   if(endIdx>=0){ meters+=mx.Dm[prev][endIdx]; t+=mx.T[prev][endIdx]; drive+=mx.T[prev][endIdx]; }
-  const exact=!Object.keys(W).length&&urg.length<=15&&rest.length<=15;
+  const exact=!Object.keys(W).length&&urg.length<=15&&rest.length<=15&&lst.length<=15;
   return {ord:ord.map(i=>i-1), legs, etas, lates, mx, sec:t-t0, drive, wait, finish:t, meters, exact, endIdx};
 }
 function departSec(){
@@ -735,7 +893,7 @@ function dayMs(sec){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime()
 function recomputeEta(){ // after a delivery: shift the remaining ETAs from "now"
   const open=state.stops.filter(s=>!s.done&&s.leg!=null); if(!open.length) return;
   let t=Date.now();
-  for(const s of state.stops){ if(s.done||s.leg==null) continue; t+=s.leg*1000; const a=secOfDay(s.after); if(a!=null&&t<dayMs(a)) t=dayMs(a); s.eta=t; t+=SVC*1000; }
+  for(const s of state.stops){ if(s.done||s.leg==null) continue; t+=s.leg*1000; const a=secOfDay(s.after); if(a!=null&&t<dayMs(a)) t=dayMs(a); s.eta=t; t+=svcOf(s)*1000; }
 }
 async function locate(G,s,near){
   const key=full(s);
@@ -754,28 +912,30 @@ async function placeOf(G,text){
 async function orderGeo(){
   const open=state.stops.filter(s=>!s.done), done=state.stops.filter(s=>s.done);
   if(open.length<1){ setStatus("אין עצירות פתוחות לסדר."); return; }
-  const btn=$("#orderGeo"); btn.disabled=true; setStatus("מאתר כתובות במפה...");
+  if(BUSY) return; BUSY=true; render(); setStatus("מאתר כתובות במפה...");
   try{
     const G=await loadGeo();
-    if(!G){ orderBasic(); setStatus("לא הצלחתי לטעון את המפה, לכן סודר לפי עיר ורחוב. נסה שוב בעוד רגע."); return; }
+    if(!G){ orderBasic(); state.dirty=false; save(); setStatus("לא הצלחתי לטעון את המפה, לכן סודר לפי עיר ורחוב. נסה שוב בעוד רגע."); return; }
     gcOffline=false;
     const startPt=state.start?await placeOf(G,state.start):(state.defCity?geocode(G,state.defCity,"",null):null);
     const endText=state.endMode==="start"?state.start:(state.endMode==="custom"?state.endAddr:"");
     const endPt=state.endMode==="start"?startPt:(endText?await placeOf(G,endText):null);
     state.startLL=startPt?{lat:startPt.lat,lon:startPt.lon}:null; state.endLL=endPt?{lat:endPt.lat,lon:endPt.lon}:null;
+    const routeStart=(state.driving&&MY)?{lat:MY.lat,lon:MY.lon}:state.startLL;
     const located=[], lost=[]; let k=0;
     for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g) located.push(s); else lost.push(s); }
     setStatus("מחשב את המסלול הקצר ביותר לפי כבישים...");
     // same point (same street) → one stop group, by house number
     const groups=new Map();
-    for(const s of located){ const key=s.lat.toFixed(5)+","+s.lon.toFixed(5)+"|"+(s.urgent?1:0)+"|"+(s.after||"")+"|"+(s.before||""); if(!groups.has(key)) groups.set(key,{p:{lat:s.lat,lon:s.lon,urgent:s.urgent,after:s.after,before:s.before},list:[]}); groups.get(key).list.push(s); }
+    for(const s of located){ const key=s.lat.toFixed(5)+","+s.lon.toFixed(5)+"|"+(s.urgent?1:0)+"|"+(s.last?1:0)+"|"+(s.after||"")+"|"+(s.before||""); if(!groups.has(key)) groups.set(key,{p:{lat:s.lat,lon:s.lon,urgent:s.urgent,last:!!s.last,after:s.after,before:s.before,svc:0},list:[]}); groups.get(key).list.push(s); groups.get(key).p.svc+=svcOf(s); }
     const G2=[...groups.values()]; G2.forEach(g=>g.list.sort((a,b)=>numOf(a)-numOf(b)));
-    const t0=departSec();
-    const r=await routeOrder(state.startLL, G2.map(g=>g.p), state.endLL, t0);
+    const t0=state.driving?nowSec():departSec();
+    const r=await routeOrder(routeStart, G2.map(g=>g.p), state.endLL, t0);
     const sorted=[]; let lateN=0;
     r.ord.forEach((gi,pos)=>{ G2[gi].list.forEach((s,j)=>{ s.leg=j===0?r.legs[pos]:0; s.eta=dayMs(r.etas[pos]+j*SVC); s.late=r.lates[pos]; if(s.late) lateN++; sorted.push(s); }); });
     lost.forEach(s=>{ s.eta=null; s.leg=null; });
-    state.stops=[...sorted,...lost,...done]; state.line=null; save(); render();
+    state.stops=[...sorted,...lost,...done]; state.line=null; state.lineKey=null; state.dirty=false; arrivedId=null;
+    state.sum={m:r.meters,drive:r.drive,finish:dayMs(r.finish),road:r.mx.road,sec:r.sec}; fitPending=!state.driving; save(); render();
     const approx=open.filter(s=>s.geo==="city").length, exactN=open.filter(s=>s.geo==="house").length;
     let msg;
     if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
@@ -787,53 +947,12 @@ async function orderGeo(){
     if(approx) msg+=" "+approx+" אותרו רק לפי העיר (מסומנות).";
     if(lost.length) msg+=" "+lost.length+" לא נמצאו במפה והועברו לסוף – בדוק אותן.";
     setStatus(msg);
-    if(!$("#mapBox").hidden) drawMap(true);
+    drawMap(true); if(state.driving) focusCur();
     cloudPushOrder();
     return r;
   }catch(e){ setStatus("החישוב נכשל. נסה שוב."); }
-  finally{ btn.disabled=false; }
+  finally{ BUSY=false; render(); }
 }
-
-/* ---------- map (Leaflet + OpenStreetMap) ---------- */
-let LMAP=null, LLAYER=null, leafletP=null;
-function loadLeaflet(){
-  if(window.L) return Promise.resolve();
-  if(leafletP) return leafletP;
-  leafletP=new Promise((res,rej)=>{
-    const css=document.createElement("link"); css.rel="stylesheet"; css.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.append(css);
-    const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; s.onload=res; s.onerror=()=>{leafletP=null;rej();}; document.head.append(s);
-  });
-  return leafletP;
-}
-function pinIcon(txt,cls){ return L.divIcon({className:"",html:'<div class="pin '+cls+'">'+txt+'</div>',iconSize:[28,28],iconAnchor:[14,14]}); }
-async function drawMap(fetchLine){
-  const box=$("#mapBox");
-  try{ await loadLeaflet(); }catch(e){ box.textContent="המפה לא נטענה – בדוק חיבור לאינטרנט."; return; }
-  if(!LMAP){
-    LMAP=L.map(box,{zoomControl:true,attributionControl:true}).setView([32.47,34.97],11);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(LMAP);
-    LLAYER=L.layerGroup().addTo(LMAP);
-  }
-  LLAYER.clearLayers(); setTimeout(()=>LMAP.invalidateSize(),50);
-  const pts=[]; const nextId=(state.stops.find(s=>!s.done)||{}).id;
-  if(state.startLL){ L.marker([state.startLL.lat,state.startLL.lon],{icon:pinIcon("⌂","s"),title:"יציאה"}).addTo(LLAYER); pts.push([state.startLL.lat,state.startLL.lon]); }
-  state.stops.forEach((s,i)=>{ if(s.lat==null) return;
-    const m=L.marker([s.lat,s.lon],{icon:pinIcon(String(i+1),s.done?"done":(s.id===nextId?"next":(s.urgent?"urg":""))),title:full(s)}).addTo(LLAYER);
-    m.bindPopup("<b>"+(i+1)+". "+escapeHtml(full(s))+"</b>"+(s.eta&&!s.done?"<br>הגעה משוערת "+clock(s.eta):""));
-    pts.push([s.lat,s.lon]); });
-  if(state.endLL&&state.endMode!=="start"){ L.marker([state.endLL.lat,state.endLL.lon],{icon:pinIcon("🏁","s"),title:"סיום"}).addTo(LLAYER); pts.push([state.endLL.lat,state.endLL.lon]); }
-  if(!pts.length){ setStatus("אין עדיין נקודות על המפה – לחץ 'סדר מסלול קצר'."); return; }
-  if(fetchLine||!state.line){
-    const seq=[]; if(state.startLL) seq.push(state.startLL);
-    state.stops.forEach(s=>{ if(!s.done&&s.lat!=null) seq.push({lat:s.lat,lon:s.lon}); });
-    if(state.endLL) seq.push(state.endLL);
-    state.line=await roadLine(seq); save();
-  }
-  if(state.line) L.polyline(state.line,{color:"#0B6B3A",weight:5,opacity:.8}).addTo(LLAYER);
-  LMAP.fitBounds(L.latLngBounds(pts).pad(0.15));
-}
-function escapeHtml(t){ return String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-
 /* ---------- message to customer ---------- */
 function intlPhone(p){ let d=String(p||"").replace(/[^\d+]/g,""); if(d.startsWith("+")) d=d.slice(1); else if(d.startsWith("0")) d="972"+d.slice(1); return d.length>=11?d:""; }
 function customerMsg(s){
@@ -864,7 +983,7 @@ async function flushTrack(){
       const x=q[0]; const fd=new URLSearchParams();
       const F=TRACK.f; fd.set(F.c,x.c); fd.set(F.a,x.a); fd.set(F.n,x.n); fd.set(F.p,x.p); fd.set(F.st,x.st); fd.set(F.r,x.r); fd.set(F.t,x.t); fd.set(F.eta,x.eta);
       await fetch(TRACK.url,{method:"POST",mode:"no-cors",body:fd});
-      q.shift(); trackSaveQ(q);
+      q=trackQueue(); q.shift(); trackSaveQ(q);
     }
   }catch(e){} finally{ flushing=false; }
 }
@@ -939,7 +1058,6 @@ async function importFromHash(){
   await orderGeo();
 }
 addEventListener("hashchange",importFromHash);
-
 /* ---------- install as an app ---------- */
 let deferredPrompt=null;
 const IS_IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
@@ -958,7 +1076,6 @@ const IOS_HOWTO="להתקנה כאפליקציה: לחץ על כפתור השי�
 const ANDROID_HOWTO="להתקנה: פתח את תפריט הדפדפן (⋮ למעלה) ← \"התקנת אפליקציה\" או \"הוספה למסך הבית\".";
 function installHowto(){ const ios=IS_IOS; $("#installBtn").hidden=true; $("#installTxt").textContent=ios?IOS_HOWTO:ANDROID_HOWTO; $("#installBanner").hidden=false; }
 addEventListener("appinstalled",()=>{ deferredPrompt=null; $("#installBanner").hidden=true; });
-
 /* ---------- ordering ---------- */
 function cityOf(st){ const f=full(st); const parts=f.split(","); if(parts.length>1) return parts[parts.length-1].trim(); const m=f.match(/\d+[א-ת]?\s+(.+)$/); return m?m[1].trim():""; }
 function streetOf(st){ return st.addr.replace(/\d+.*$/,"").trim(); }
@@ -969,7 +1086,7 @@ function orderBasic(){
   const cities=[]; open.forEach(s=>{const c=cityOf(s); if(!cities.includes(c)) cities.push(c);});
   cities.sort((a,b)=>(a===startCity?-1:0)-(b===startCity?-1:0));
   open.sort((a,b)=>cities.indexOf(cityOf(a))-cities.indexOf(cityOf(b)) || streetOf(a).localeCompare(streetOf(b),"he") || numOf(a)-numOf(b));
-  state.stops=[...open,...done]; save(); render();
+  state.stops=[...open,...done]; save(); render(); if(typeof retime==="function"&&open.some(s=>s.lat!=null)) retime(true);
   setStatus("סודר לפי עיר, ואז לפי רחוב ומספר בית. זה לא מחשב מרחקים – אפשר להזיז עצירות עם החצים.");
 }
 let sample=null, aiCtl=null;
@@ -1012,7 +1129,6 @@ async function aiParse(){
     if(e&&["not_granted","sampling_disabled"].includes(e.code)) b.hidden=true;
   }finally{ b.disabled=false; }
 }
-
 /* ---------- screenshots ---------- */
 let imgFiles=[], imgItems=[], imgOk=false;
 function onImages(files){
@@ -1093,7 +1209,6 @@ async function imgParse(){
     p.textContent="הקריאה בטלפון נכשלה."+(imgOk?" נסה 'קריאה מדויקת עם Claude'.":" אפשר להעתיק את הטקסט מוואטסאפ ולהדביק בלשונית 'מוואטסאפ'.");
   }finally{ b.disabled=!imgFiles.length; }
 }
-
 /* ---------- Google Maps full route ---------- */
 function gmapsRoutes(){
   const open=state.stops.filter(s=>!s.done).map(full);
@@ -1123,85 +1238,693 @@ function copyForWhatsApp(){
   copyText(lines.join("\n"), $("#copyOut"));
 }
 
-/* ---------- render ---------- */
-function render(){
-  $("#startAddr").value=state.start||""; $("#defCity").value=state.defCity||"";
-  $("#exampleBanner").hidden=!state.example;
-  $("#endMode").value=state.endMode||"none"; $("#endAddr").value=state.endAddr||""; $("#endAddrLbl").hidden=(state.endMode!=="custom");
-  $("#departAt").value=state.departAt||""; $("#courierName").value=state.courier||"";
-  const total=state.stops.length, done=state.stops.filter(s=>s.done).length;
-  $("#progTxt").textContent=done+"/"+total+" טופלו";
-  $("#progBar").style.width=(total?Math.round(done/total*100):0)+"%";
-  const ol=$("#stops"); ol.innerHTML="";
-  if(!total){
-    ol.append(el("li",{class:"empty"},"אין עדיין עצירות. מוסיפים כתובות למעלה: מהודעת וואטסאפ, מקובץ אקסל או ידנית."));
-    return;
-  }
-  const nextId=(state.stops.find(s=>!s.done)||{}).id;
-  state.stops.forEach((s,i)=>{
-    const isNext=s.id===nextId;
-    const li=el("li",{class:"stop"+(s.done?" done":"")+(s.failed?" failed":"")+(isNext?" next":"")});
-    li.append(el("div",{class:"num","aria-hidden":"true",text:String(i+1)}));
-    const a=el("div",{class:"addr"},full(s)); if(isNext) a.append(el("span",{class:"tag",text:"הבא"}));
-    li.append(a);
-    const meta=el("div",{class:"meta"});
-    if(!s.done&&s.urgent) meta.append(el("span",{class:"chip urgent",text:"דחוף"}));
-    if(!s.done&&(s.after||s.before)) meta.append(el("span",{class:"chip",text:s.after&&s.before?("בין "+s.after+"–"+s.before):(s.after?"לא לפני "+s.after:"עד "+s.before)}));
-    if(!s.done&&s.eta) meta.append(el("span",{class:"chip eta",text:"הגעה ~"+clock(s.eta)+(s.late?" ⚠ מאחר":"")}));
-    if(s.failed) meta.append(el("span",{class:"chip fail",text:"לא נמסר"+(s.reason?": "+s.reason:"")}));
-    if(!s.done&&s.geo==="city") meta.append(el("span",{class:"geo",text:"📍 מיקום לפי עיר בלבד"}));
-    if(!s.done&&s.geo==="none") meta.append(el("span",{class:"geo bad",text:"⚠ לא נמצא במפה"}));
-    if(s.name) meta.append(el("span",{},el("b",{text:s.name})));
-    if(s.phone) meta.append(el("span",{},"☎ ",el("a",{href:"tel:"+s.phone.replace(/[^\d+]/g,""),text:s.phone})));
-    if(s.note) meta.append(el("span",{text:s.note}));
-    if(s.done&&s.doneAt&&!s.failed) meta.append(el("span",{text:"נמסר "+clock(s.doneAt)}));
-    li.append(meta);
-    const act=el("div",{class:"sactions"},
-      el("a",{class:"btn primary",href:waze(full(s)),target:"_blank",rel:"noopener",text:"Waze"}),
-      el("a",{class:"btn ghost",href:gmaps(full(s)),target:"_blank",rel:"noopener",text:"גוגל מפות"}),
-      el("button",{class:"btn "+(s.done?"ghost":"amber"),type:"button",onclick:()=>markDone(s,!s.done),text:s.done?(s.failed?"בטל":"בטל מסירה"):"נמסר ✓"}),
-      (!s.done?el("button",{class:"btn ghost",type:"button",onclick:()=>markFailed(s),text:"לא נמסר"}):null),
-      (!s.done&&intlPhone(s.phone)?el("a",{class:"btn ghost",href:"https://wa.me/"+intlPhone(s.phone)+"?text="+encodeURIComponent(customerMsg(s)),target:"_blank",rel:"noopener",text:"📲 הודעה ללקוח"}):null),
-      el("button",{class:"btn ghost sm",type:"button","aria-label":"הזז למעלה",onclick:()=>move(i,-1),disabled:i===0?"":null,text:"▲"}),
-      el("button",{class:"btn ghost sm",type:"button","aria-label":"הזז למטה",onclick:()=>move(i,1),disabled:i===total-1?"":null,text:"▼"}),
-      el("button",{class:"btn ghost sm",type:"button",onclick:()=>editStop(li,s),text:"עריכה"})
-    );
-    li.append(act);
-    ol.append(li);
-  });
+/* =====================================================================
+   Map-first UI: full-screen map, bottom sheet, driving mode, proof of delivery
+   ===================================================================== */
+const ICONS={
+  menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  locate:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>',
+  layers:'<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  nav:'<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
+  check:'<path d="M5 12.5l4.5 4.5L19 7"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  msg:'<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  box:'<path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  grip:'<circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  camera:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',
+  skip:'<path d="M5 5l10 7-10 7V5zM19 5v14"/>',
+  list:'<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  flag:'<path d="M5 21V4h11l-2 4 2 4H5"/>',
+  share:'<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
+  spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
+  swap:'<path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/>',
+  pen:'<path d="M3 20c3-1 4-5 6-5s1.5 3 3.5 3S16 14 21 13"/>',
+  scan:'<path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/>',
+  pickup:'<path d="M12 21V9M7 14l5-5 5 5"/><path d="M4 4h16"/>'
+};
+function ic(n){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[n]||"")+'</svg>'; }
+function icon(n){ const s=document.createElement("span"); s.className="i"; s.innerHTML=ic(n); return s; }
+document.querySelectorAll("[data-i]").forEach(x=>{ x.classList.add("i"); x.innerHTML=ic(x.dataset.i); });
+$("#menuBtn").innerHTML='<span class="i">'+ic("menu")+'</span>';
+
+let BUSY=false, MY=null, myWatch=null, myMarker=null, arrivedId=null;
+function nowSec(){ const n=new Date(); return n.getHours()*3600+n.getMinutes()*60+n.getSeconds(); }
+function svcOf(s){ return s&&s.svc!=null&&s.svc!==""&&isFinite(+s.svc)?Math.max(0,+s.svc)*60:SVC; }
+function applySettings(){ const m=Number(state.svcMin); SVC=(isFinite(m)&&state.svcMin!==""&&state.svcMin!=null?Math.max(0,m):3)*60; }
+applySettings();
+function openStops(){ return state.stops.filter(s=>!s.done); }
+function curStop(){ return state.stops.find(s=>!s.done)||null; }
+function idxOf(s){ return state.stops.indexOf(s)+1; }
+function fmtDur(sec){ sec=Math.max(0,Math.round(sec/60)); if(sec<60) return sec+" דק'"; return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")+" שע'"; }
+function fmtKm(m){ return m<1000?Math.round(m/10)*10+" מ'":(m/1000).toFixed(m<10000?1:0)+" ק\"מ"; }
+function setStatus(t){ const s=$("#status"); if(s) s.textContent=t||""; }
+function isPick(s){ return s&&s.type==="pickup"; }
+function spotText(s){ const p=s&&s.spot; if(!p) return ""; return [p.z,p.sd,p.h].filter(Boolean).join(" · "); }
+function winText(s){ return s.after&&s.before?("בין "+s.after+"–"+s.before):(s.after?"לא לפני "+s.after:(s.before?"עד "+s.before:"")); }
+
+/* ---------- toast ---------- */
+let toastT=null;
+function toast(text,btn,fn,ms){
+  const t=$("#toast"); $("#toastTxt").textContent=text; const b=$("#toastBtn");
+  if(btn){ b.hidden=false; b.textContent=btn; b.onclick=()=>{ t.hidden=true; fn&&fn(); }; } else b.hidden=true;
+  t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>{ t.hidden=true; },ms||3800);
 }
+
+/* ---------- small storage for photos & signatures (stays on the phone) ---------- */
+const IDB={db:null,
+  open(){ if(this.db) return Promise.resolve(this.db); return new Promise((res,rej)=>{ try{ const r=indexedDB.open("courier-pod",1); r.onupgradeneeded=()=>r.result.createObjectStore("f"); r.onsuccess=()=>{this.db=r.result;res(this.db);}; r.onerror=()=>rej(r.error); }catch(e){ rej(e); } }); },
+  async put(k,v){ try{ const db=await this.open(); await new Promise((res,rej)=>{ const tx=db.transaction("f","readwrite"); tx.objectStore("f").put(v,k); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); return true; }catch(e){ return false; } },
+  async get(k){ try{ const db=await this.open(); return await new Promise((res)=>{ const q=db.transaction("f").objectStore("f").get(k); q.onsuccess=()=>res(q.result||null); q.onerror=()=>res(null); }); }catch(e){ return null; } },
+  async del(k){ try{ const db=await this.open(); db.transaction("f","readwrite").objectStore("f").delete(k); }catch(e){} }
+};
+async function shrinkPhoto(file,max){
+  try{
+    const bmp=await createImageBitmap(file,{imageOrientation:"from-image"}); const k=Math.min(1,(max||900)/Math.max(bmp.width,bmp.height));
+    const c=document.createElement("canvas"); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k);
+    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height); bmp.close&&bmp.close();
+    return c.toDataURL("image/jpeg",0.62);
+  }catch(e){ return await new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.onerror=()=>r(null); fr.readAsDataURL(file); }); }
+}
+function dataUrlToFile(u,name){ const [h,b]=u.split(","); const mime=(h.match(/:(.*?);/)||[,"image/jpeg"])[1]; const bin=atob(b); const a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return new File([a],name,{type:mime}); }
+function pickPhoto(){ return new Promise(res=>{ const f=$("#podFile"); f.value=""; f.onchange=async()=>{ const x=f.files&&f.files[0]; res(x?await shrinkPhoto(x,900):null); }; f.click(); }); }
+
+/* ---------- sheets (modal) ---------- */
+let openId=null;
+function openSheet(id){
+  closeSheets(true);
+  $("#scrim").hidden=false; $("#"+id).hidden=false; openId=id;
+  try{ history.pushState({sheet:id},""); }catch(e){}
+  const f=$("#"+id).querySelector("[data-autofocus]"); if(f) setTimeout(()=>f.focus(),60);
+}
+function closeSheets(silent){
+  if(!openId) return;
+  const was=openId; openId=null; $("#scrim").hidden=true; $("#"+was).hidden=true;
+  if(!silent&&history.state&&history.state.sheet){ try{ history.back(); }catch(e){} }
+  if(was==="dynSheet") $("#dynBody").innerHTML="";
+}
+addEventListener("popstate",()=>{ if(openId){ const was=openId; openId=null; $("#scrim").hidden=true; $("#"+was).hidden=true; } });
+$("#scrim").addEventListener("click",()=>closeSheets());
+document.addEventListener("click",e=>{ if(e.target.closest("[data-close]")) closeSheets(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&openId) closeSheets(); });
+function dyn(title,...kids){
+  const B=$("#dynBody"); B.innerHTML="";
+  B.append(el("div",{class:"mhead"},el("h2",{text:title}),el("button",{class:"iconbtn",type:"button","data-close":"","aria-label":"סגור"},icon("x"))));
+  kids.forEach(k=>k&&B.append(k));
+  openSheet("dynSheet"); $("#dynSheet").scrollTop=0;
+  return B;
+}
+function fld(label,input){ const id=input.id||("f"+uid()); input.id=id; return el("label",{class:"f",for:id},label,input); }
+function seg(label,opts,value){
+  let v=value; const wrap=el("div",{}); if(label) wrap.append(el("p",{class:"seglbl",text:label}));
+  const box=el("div",{class:"seg",role:"group","aria-label":label||""});
+  opts.forEach(([val,txt])=>{ const b=el("button",{type:"button","aria-pressed":String(val===v),text:txt,onclick:()=>{ v=(v===val&&val!=="")?"":val; box.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.v===v))); }}); b.dataset.v=val; box.append(b); });
+  wrap.append(box); wrap.get=()=>v; return wrap;
+}
+
+/* ---------- navigation app ---------- */
+function navUrl(s){
+  const precise=s.lat!=null&&s.geo==="house", ll=precise?s.lat+","+s.lon:null, q=full(s);
+  switch(state.navApp||"waze"){
+    case "gmaps": return "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination="+encodeURIComponent(ll||q);
+    case "apple": return "https://maps.apple.com/?dirflg=d&daddr="+encodeURIComponent(ll||q);
+    default: return ll?"https://waze.com/ul?ll="+ll+"&navigate=yes":waze(q);
+  }
+}
+function navTo(s){ if(!s) return; const a=el("a",{href:navUrl(s),target:"_blank",rel:"noopener"}); document.body.append(a); a.click(); a.remove(); }
+function waLink(s){ const p=intlPhone(s.phone); return p?"https://wa.me/"+p+"?text="+encodeURIComponent(customerMsg(s)):null; }
+
+/* ---------- re-timing a route in the order it is now (after drag / skip / "next") ---------- */
+async function retime(quiet){
+  const open=openStops().filter(s=>s.lat!=null);
+  if(!open.length){ save(); render(); return; }
+  const start=(state.driving&&MY)?MY:state.startLL;
+  const nodes=[start||open[0],...open]; const endI=state.endLL?nodes.length:-1; if(state.endLL) nodes.push(state.endLL);
+  const mx=(await roadMatrix(nodes))||airMatrix(nodes);
+  if(!start){ for(let j=0;j<nodes.length;j++){ mx.T[0][j]=0; mx.Dm[0][j]=0; } }
+  let t=state.driving?nowSec():departSec(), prev=0, meters=0, drive=0; const t0=t;
+  open.forEach((s,k)=>{ const i=k+1; const d=mx.T[prev][i]; meters+=mx.Dm[prev][i]; drive+=d; s.leg=d; t+=d; const a=secOfDay(s.after); if(a!=null&&t<a) t=a; s.eta=dayMs(t); const b=secOfDay(s.before); s.late=b!=null&&t>b; t+=svcOf(s); prev=i; });
+  if(endI>=0){ meters+=mx.Dm[prev][endI]; drive+=mx.T[prev][endI]; t+=mx.T[prev][endI]; }
+  state.sum={m:meters,drive,finish:dayMs(t),road:mx.road,sec:t-t0}; state.dirty=false; state.line=null;
+  save(); render(); drawMap(true); cloudPushOrder();
+  if(!quiet) setStatus(mx.road?"הזמנים חושבו מחדש לפי הסדר שבחרת.":"הזמנים חושבו לפי קו אווירי (אין חיבור לשרת הכבישים).");
+}
+function moveToFront(s){
+  const open=openStops().filter(x=>x!==s), done=state.stops.filter(x=>x.done);
+  state.stops=[s,...open,...done]; arrivedId=null;
+  retime(true); toast("“"+s.addr+"” הוא עכשיו הבא בתור"); if(state.driving) focusCur();
+}
+function skipStop(s){
+  const open=openStops().filter(x=>x!==s), done=state.stops.filter(x=>x.done);
+  state.stops=[...open,s,...done]; arrivedId=null; retime(true); toast("דילגת – “"+s.addr+"” הועבר לסוף המסלול","בטל",()=>{ const o=openStops().filter(x=>x!==s); state.stops=[s,...o,...state.stops.filter(x=>x.done)]; retime(true); });
+}
+function reverseRoute(){
+  const open=openStops(), done=state.stops.filter(s=>s.done);
+  if(open.length<2){ toast("צריך לפחות שתי עצירות פתוחות."); return; }
+  if(state.driving){ const [c,...r]=open; state.stops=[c,...r.reverse(),...done]; } else state.stops=[...open.reverse(),...done];
+  retime(); closeSheets();
+}
+
+/* ---------- marking ---------- */
 function askCourier(){
   if(state.courier||!TRACK.url) return;
   const n=prompt("מה השם שלך? (יופיע בדיווח למנהל)"); if(n&&n.trim()){ state.courier=n.trim(); save(); }
 }
-function markDone(s,on){
-  if(on){ askCourier(); s.done=true; s.failed=false; s.reason=""; s.doneAt=Date.now(); track(s,"נמסר",""); recomputeEta(); cloudPatch(s,{status:"delivered",reason:"",done_at:new Date().toISOString()}); }
-  else { const was=s.failed?"ביטול 'לא נמסר'":"ביטול מסירה"; s.done=false; s.failed=false; s.reason=""; s.doneAt=null; track(s,was,""); cloudPatch(s,{status:"assigned",reason:"",done_at:null}); }
-  save(); render(); if(!$("#mapBox").hidden) drawMap(false);
+function podText(s){
+  const p=s.pod||{}; return [p.where, p.recipient?"התקבל ע\"י "+p.recipient:"", s.pkg?"משלוח "+s.pkg:"", p.note, p.photo?"צולם":"", p.sig?"נחתם":""].filter(Boolean).join(" · ");
 }
-function markFailed(s){
-  const r=prompt("למה לא נמסר? (למשל: לא בבית, כתובת שגויה, לא עונה)",""); if(r===null) return;
-  askCourier(); s.done=true; s.failed=true; s.reason=r.trim(); s.doneAt=Date.now(); track(s,"לא נמסר",s.reason); recomputeEta(); cloudPatch(s,{status:"failed",reason:s.reason,done_at:new Date().toISOString()}); save(); render();
+function afterMark(s,label){
+  arrivedId=null; save(); closeSheets(); render(); drawMap(false);
+  const next=curStop();
+  if(state.driving&&next&&state.autoNav) navTo(next);
+  if(state.driving&&next) focusCur();
+  toast(label,"בטל",()=>unmark(s),6000);
+  if(state.driving&&!next){ snap("half"); }
 }
-function move(i,d){ const j=i+d; if(j<0||j>=state.stops.length) return; const a=state.stops; [a[i],a[j]]=[a[j],a[i]]; save(); render(); }
-function editStop(li,s){
-  if(li.querySelector(".edit")) return;
-  const f=(lbl,val,key)=>{const id="e_"+key+"_"+s.id; const inp=el("input",{type:"text",id,value:val||""}); return [el("label",{class:"f",for:id},lbl,inp),inp];};
-  const [l1,i1]=f("כתובת",s.addr,"addr"),[l2,i2]=f("עיר",s.city,"city"),[l3,i3]=f("שם",s.name,"name"),[l4,i4]=f("טלפון",s.phone,"phone"),[l5,i5]=f("הערה",s.note,"note");
-  const uId="e_u_"+s.id, aId="e_a_"+s.id, bId="e_b_"+s.id;
-  const iu=el("input",{type:"checkbox",id:uId}); iu.checked=!!s.urgent;
-  const ia=el("input",{type:"time",id:aId,value:s.after||""}), ib=el("input",{type:"time",id:bId,value:s.before||""});
-  const box=el("div",{class:"edit"},el("div",{class:"row"},l1,l2),el("div",{class:"row"},l3,l4,l5),
-    el("div",{class:"row",style:"align-items:end"},el("label",{class:"chk",for:uId},iu," דחוף – בהתחלה"),el("label",{class:"f",for:aId},"לא לפני",ia),el("label",{class:"f",for:bId},"עד השעה",ib)),
-    el("div",{class:"actions"},
-      el("button",{class:"btn primary",type:"button",text:"שמור",onclick:()=>{ if(!i1.value.trim()) return; Object.assign(s,{addr:i1.value.trim(),city:i2.value.trim(),name:i3.value.trim(),phone:i4.value.trim(),note:i5.value.trim(),urgent:iu.checked,after:ia.value||"",before:ib.value||""}); if(s.gk!==full(s)){ s.geo=undefined; s.lat=null; s.lon=null; s.eta=null; } cloudPatch(s,{addr:s.addr,city:s.city,cust_name:s.name,note:s.note,urgent:!!s.urgent,after_t:s.after,before_t:s.before,lat:s.lat??null,lon:s.lon??null}); save(); render(); }}),
-      el("button",{class:"btn ghost",type:"button",text:"ביטול",onclick:()=>render()}),
-      el("button",{class:"btn danger",type:"button",text:"מחק עצירה",onclick:()=>{ if(ME&&s.rid&&!s.mine){ setStatus("את המשלוח הזה שיבץ המנהל – רק הוא יכול להסיר אותו."); return; } if(ME&&s.rid) cloudPatch(s,{status:"cancelled"}); state.stops=state.stops.filter(x=>x.id!==s.id); save(); render(); setStatus("העצירה נמחקה."); }})
-    ));
-  li.append(box); i1.focus();
+function markDelivered(s,pod){
+  askCourier();
+  s.done=true; s.failed=false; s.reason=""; s.doneAt=Date.now(); s.pod=pod||{};
+  const r=podText(s);
+  track(s,isPick(s)?"נאסף":"נמסר",r); recomputeEta();
+  cloudPatch(s,{status:"delivered",reason:r,done_at:new Date().toISOString()});
+  if(pod&&pod.photoData) IDB.put("p:"+s.id,pod.photoData); if(pod&&pod.sigData) IDB.put("s:"+s.id,pod.sigData);
+  if(s.pod){ delete s.pod.photoData; delete s.pod.sigData; }
+  afterMark(s,(isPick(s)?"נאסף: ":"נמסר: ")+s.addr);
+}
+function markFailed(s,reason,photo){
+  askCourier();
+  s.done=true; s.failed=true; s.reason=reason||""; s.doneAt=Date.now(); s.pod={photo:!!photo};
+  track(s,"לא נמסר",s.reason); recomputeEta();
+  cloudPatch(s,{status:"failed",reason:s.reason,done_at:new Date().toISOString()});
+  if(photo) IDB.put("p:"+s.id,photo);
+  afterMark(s,"לא נמסר: "+s.addr);
+}
+function unmark(s){
+  const was=s.failed?"ביטול 'לא נמסר'":"ביטול מסירה";
+  s.done=false; s.failed=false; s.reason=""; s.doneAt=null; s.pod=null; IDB.del("p:"+s.id); IDB.del("s:"+s.id);
+  track(s,was,""); cloudPatch(s,{status:"assigned",reason:"",done_at:null});
+  // back into the open list, before the current next stop
+  const others=state.stops.filter(x=>x!==s); const firstOpen=others.findIndex(x=>!x.done);
+  others.splice(firstOpen<0?others.length:firstOpen,0,s); state.stops=others;
+  save(); render(); drawMap(false); toast("הסימון בוטל – "+s.addr+" חזר למסלול");
 }
 
-/* ---------- wiring ---------- */
+/* ---------- proof of delivery ---------- */
+function openPod(s){
+  const pick=isPick(s);
+  const where=seg(pick?"":"איפה נמסר?",pick?[]:[["ללקוח ביד","ללקוח ביד"],["ליד הדלת","ליד הדלת"],["בתיבת הדואר","תיבת דואר"],["אצל שכן","אצל שכן"],["בלובי / קבלה","לובי / קבלה"],["במקום אחר","אחר"]],pick?"":"ללקוח ביד");
+  const rec=el("input",{type:"text",placeholder:"לא חובה",autocomplete:"off"});
+  const note=el("input",{type:"text",placeholder:"לא חובה",autocomplete:"off"});
+  let photo=null, sig=null;
+  const pv=el("div",{});
+  const camB=el("button",{class:"btn ghost",type:"button",onclick:async()=>{ const d=await pickPhoto(); if(d){ photo=d; pv.innerHTML=""; pv.append(el("img",{class:"photo",src:d,alt:"צילום המסירה"})); camB.lastChild.textContent=" צלם שוב"; } }},icon("camera"),el("span",{text:" צילום הוכחה"+(state.needPhoto?" (חובה)":"")}));
+  const sigBox=el("div",{hidden:""}); let sigC=null;
+  const sigB=el("button",{class:"btn ghost",type:"button",onclick:()=>{ sigBox.hidden=!sigBox.hidden; if(!sigC){ sigC=sigPad(sigBox); } }},icon("pen"),el("span",{text:" חתימת לקוח"}));
+  const err=el("p",{class:"status",style:"color:var(--danger);font-weight:700"});
+  const save=el("button",{class:"btn ok big block",type:"button",onclick:()=>{
+    if(state.needPhoto&&!photo){ err.textContent="צריך צילום הוכחה לפני הסיום."; return; }
+    if(sigC&&!sigC.empty()) sig=sigC.data();
+    markDelivered(s,{where:where.get(),recipient:rec.value.trim(),note:note.value.trim(),photo:!!photo,sig:!!sig,photoData:photo,sigData:sig});
+  }},icon("check"),el("span",{text:pick?" סיום איסוף":" סיום מסירה"}));
+  dyn((pick?"איסוף – ":"מסירה – ")+s.addr,
+    pick?null:where, pick?null:fld("שם המקבל",rec), fld("הערה",note),
+    el("div",{class:"actions",style:"margin-top:0"},camB,sigB), pv, sigBox, err,
+    el("div",{class:"actions"},save));
+}
+function sigPad(box){
+  const c=el("canvas",{class:"sig","aria-label":"משטח חתימה"}); const clr=el("button",{class:"btn ghost sm",type:"button",text:"נקה חתימה"});
+  box.append(c,el("div",{class:"actions"},clr));
+  const fit=()=>{ const r=c.getBoundingClientRect(); c.width=r.width*devicePixelRatio; c.height=r.height*devicePixelRatio; const x=c.getContext("2d"); x.scale(devicePixelRatio,devicePixelRatio); x.lineWidth=2.4; x.lineCap="round"; x.strokeStyle="#111"; };
+  setTimeout(fit,30); let dn=false, any=false, last=null; const x=()=>c.getContext("2d");
+  const pt=e=>{ const r=c.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; };
+  c.addEventListener("pointerdown",e=>{ dn=true; last=pt(e); c.setPointerCapture(e.pointerId); });
+  c.addEventListener("pointermove",e=>{ if(!dn) return; const p=pt(e); const g=x(); g.beginPath(); g.moveTo(...last); g.lineTo(...p); g.stroke(); last=p; any=true; });
+  c.addEventListener("pointerup",()=>{ dn=false; });
+  clr.onclick=()=>{ x().clearRect(0,0,c.width,c.height); any=false; };
+  return {empty:()=>!any, data:()=>c.toDataURL("image/png")};
+}
+function openFail(s){
+  const reasons=["לא בבית","לא עונה לטלפון","כתובת שגויה","סירב לקבל","אין גישה / שער סגור","העסק סגור","ביקש לדחות"];
+  const r=seg("למה לא נמסר?",reasons.map(x=>[x,x]),"");
+  const other=el("input",{type:"text",placeholder:"פירוט (לא חובה)",autocomplete:"off"});
+  let photo=null; const pv=el("div",{});
+  const camB=el("button",{class:"btn ghost",type:"button",onclick:async()=>{ const d=await pickPhoto(); if(d){ photo=d; pv.innerHTML=""; pv.append(el("img",{class:"photo",src:d,alt:"צילום"})); } }},icon("camera"),el("span",{text:" צילום (לא חובה)"}));
+  const err=el("p",{class:"status",style:"color:var(--danger);font-weight:700"});
+  dyn("לא נמסר – "+s.addr, r, fld("פירוט",other), el("div",{class:"actions",style:"margin-top:0"},camB), pv, err,
+    el("div",{class:"actions"},el("button",{class:"btn fail big block",type:"button",onclick:()=>{ const why=[r.get(),other.value.trim()].filter(Boolean).join(" – "); if(!why){ err.textContent="בחר סיבה או כתוב פירוט."; return; } markFailed(s,why,photo); }},icon("x"),el("span",{text:" סמן כלא נמסר"}))));
+}
+
+/* ---------- stop details & edit ---------- */
+async function scanCode(){
+  if(!("BarcodeDetector" in window)) return null;
+  return new Promise(res=>{ const f=$("#scanFile"); f.value=""; f.onchange=async()=>{ const x=f.files&&f.files[0]; if(!x) return res(null);
+    try{ const bmp=await createImageBitmap(x); const det=new BarcodeDetector(); const r=await det.detect(bmp); res(r&&r[0]?r[0].rawValue:""); }catch(e){ res(""); } }; f.click(); });
+}
+function openStop(s){
+  const n=idxOf(s), pick=isPick(s);
+  const kids=[];
+  if(s.done){
+    const box=el("div",{class:"pod"+(s.failed?" f":"")},
+      el("b",{text:(s.failed?"לא נמסר":(pick?"נאסף":"נמסר"))+(s.doneAt?" בשעה "+clock(s.doneAt):"")}),
+      el("div",{text:s.failed?(s.reason||""):podText(s)}));
+    const media=el("div",{}); box.append(media);
+    IDB.get("p:"+s.id).then(d=>{ if(d) media.append(el("img",{class:"photo",src:d,alt:"צילום הוכחה"})); });
+    IDB.get("s:"+s.id).then(d=>{ if(d) media.append(el("img",{class:"photo",src:d,alt:"חתימה",style:"background:#fff"})); });
+    kids.push(box, el("div",{class:"qact"},
+      el("button",{class:"btn ghost",type:"button",onclick:()=>{ closeSheets(); unmark(s); }},icon("undo"),el("span",{text:" בטל סימון"})),
+      el("button",{class:"btn ghost",type:"button",onclick:()=>sharePod(s)},icon("share"),el("span",{text:" שתף הוכחה"}))));
+  } else {
+    const wl=waLink(s);
+    kids.push(el("div",{class:"qact"},
+      el("button",{class:"btn primary",type:"button",onclick:()=>navTo(s)},icon("nav"),el("span",{text:" נווט"})),
+      el("button",{class:"btn ok",type:"button",onclick:()=>openPod(s)},icon("check"),el("span",{text:pick?" נאסף":" נמסר"})),
+      el("button",{class:"btn fail",type:"button",onclick:()=>openFail(s)},icon("x"),el("span",{text:" לא נמסר"})),
+      s.phone?el("a",{class:"btn ghost",href:"tel:"+s.phone.replace(/[^\d+]/g,"")},icon("phone"),el("span",{text:" חייג"})):null,
+      wl?el("a",{class:"btn ghost",href:wl,target:"_blank",rel:"noopener"},icon("msg"),el("span",{text:" בדרך אליך"})):null,
+      (curStop()!==s)?el("button",{class:"btn ghost",type:"button",onclick:()=>{ closeSheets(); moveToFront(s); }},icon("skip"),el("span",{text:" הבא בתור"})):null));
+    const info=[s.eta?"הגעה משוערת "+clock(s.eta)+(s.late?" – מאחר מהשעה שביקשו":""):"", s.geo==="city"?"מיקום לפי עיר בלבד – כדאי לבדוק את הכתובת":"", s.geo==="none"?"הכתובת לא נמצאה במפה":""].filter(Boolean);
+    if(info.length) kids.push(el("p",{class:"hint",style:"margin:0 0 10px",text:info.join(" · ")}));
+  }
+  // edit form
+  const v=(val,attrs)=>el("input",Object.assign({type:"text",value:val||"",autocomplete:"off"},attrs||{}));
+  const iA=v(s.addr), iC=v(s.city,{placeholder:"ריק = "+(state.defCity||"עיר ברירת המחדל")}), iN=v(s.name), iP=v(s.phone,{type:"tel"}), iNo=v(s.note,{placeholder:"קומה, קוד, להשאיר ליד הדלת"});
+  const iPkg=v(s.pkg,{placeholder:"מספר משלוח / ברקוד"}), iCnt=el("input",{type:"number",min:"1",max:"99",value:s.pkgs||"",placeholder:"1",inputmode:"numeric"});
+  const iAf=el("input",{type:"time",value:s.after||""}), iBf=el("input",{type:"time",value:s.before||""}), iSv=el("input",{type:"number",min:"0",max:"120",value:s.svc??"",placeholder:String(Math.round(SVC/60)),inputmode:"numeric"});
+  const type=seg("סוג עצירה",[["","מסירה"],["pickup","איסוף"]],s.type||"");
+  const prio=seg("סדר במסלול",[["","אוטומטי"],["first","ראשון / דחוף"],["last","אחרון"]],s.urgent?"first":(s.last?"last":""));
+  const sp=s.spot||{};
+  const sz=seg("איפה החבילה ברכב",[["קדימה","קדימה"],["אמצע","אמצע"],["אחורה","אחורה"]],sp.z||"");
+  const ss=seg("",[["ימין","ימין"],["שמאל","שמאל"]],sp.sd||"");
+  const sh=seg("",[["רצפה","רצפה"],["מדף","מדף"]],sp.h||"");
+  const scanB=("BarcodeDetector" in window)?el("button",{class:"iconbtn",type:"button","aria-label":"סרוק ברקוד",onclick:async()=>{ const c=await scanCode(); if(c) iPkg.value=c; else if(c==="") toast("לא זוהה ברקוד בצילום."); }},icon("scan")):null;
+  const saveB=el("button",{class:"btn primary big block",type:"button",onclick:()=>{
+    if(!iA.value.trim()){ iA.focus(); return; }
+    const oldKey=full(s), oldT=[s.urgent,s.last,s.after,s.before,s.svc].join("|");
+    Object.assign(s,{addr:iA.value.trim(),city:iC.value.trim(),name:iN.value.trim(),phone:iP.value.trim(),note:iNo.value.trim(),pkg:iPkg.value.trim(),pkgs:iCnt.value?Math.max(1,+iCnt.value):"",
+      after:iAf.value||"",before:iBf.value||"",svc:iSv.value===""?null:Math.max(0,+iSv.value),type:type.get(),urgent:prio.get()==="first",last:prio.get()==="last"});
+    const spot={z:sz.get(),sd:ss.get(),h:sh.get()}; s.spot=(spot.z||spot.sd||spot.h)?spot:null;
+    const moved=full(s)!==oldKey; if(moved){ s.geo=undefined; s.lat=null; s.lon=null; s.eta=null; }
+    if(moved||oldT!==[s.urgent,s.last,s.after,s.before,s.svc].join("|")) state.dirty=true;
+    cloudPatch(s,{addr:s.addr,city:s.city,cust_name:s.name,note:s.note,urgent:!!s.urgent,after_t:s.after,before_t:s.before,lat:s.lat??null,lon:s.lon??null});
+    save(); closeSheets(); render(); if(moved) locateOne(s); else drawMap(false); toast("נשמר");
+  }},el("span",{text:"שמור שינויים"}));
+  const delB=el("button",{class:"btn danger",type:"button",onclick:()=>{
+    if(ME&&s.rid&&!s.mine){ toast("את המשלוח הזה שיבץ המנהל – רק הוא יכול להסיר אותו."); return; }
+    if(delB.dataset.arm!=="1"){ delB.dataset.arm="1"; delB.lastChild.textContent=" בטוח? לחץ שוב"; return; }
+    if(ME&&s.rid) cloudPatch(s,{status:"cancelled"});
+    state.stops=state.stops.filter(x=>x.id!==s.id); state.dirty=true; IDB.del("p:"+s.id); IDB.del("s:"+s.id); save(); closeSheets(); render(); drawMap(false); toast("העצירה נמחקה");
+  }},icon("trash"),el("span",{text:" מחק עצירה"}));
+  dyn((s.done?"":n+". ")+full(s), ...kids,
+    el("p",{class:"lbl",text:"פרטי העצירה"}),
+    el("div",{class:"row"},fld("כתובת",iA),fld("עיר",iC)),
+    el("div",{class:"row"},fld("שם הלקוח",iN),fld("טלפון",iP)),
+    fld("הערה לשליח",iNo),
+    el("div",{class:"row",style:"align-items:end"},el("label",{class:"f",for:"pk_"+s.id},"מספר משלוח",el("div",{style:"display:flex;gap:6px"},Object.assign(iPkg,{id:"pk_"+s.id}),scanB)),fld("חבילות",iCnt)),
+    sz,ss,sh,
+    type,prio,
+    el("div",{class:"row"},fld("לא לפני",iAf),fld("עד השעה",iBf),fld("דקות בעצירה",iSv)),
+    el("div",{class:"actions"},saveB),
+    el("div",{class:"actions"},delB));
+}
+async function sharePod(s){
+  const d=await IDB.get("p:"+s.id), sg=await IDB.get("s:"+s.id);
+  const text=(s.failed?"לא נמסר":"נמסר")+": "+full(s)+(s.name?" – "+s.name:"")+(s.doneAt?" ("+clock(s.doneAt)+")":"")+"\n"+(s.failed?s.reason:podText(s));
+  const files=[]; if(d) files.push(dataUrlToFile(d,"מסירה.jpg")); if(sg) files.push(dataUrlToFile(sg,"חתימה.png"));
+  try{ if(navigator.canShare&&files.length&&navigator.canShare({files})){ await navigator.share({files,text}); return; } if(navigator.share){ await navigator.share({text}); return; } }catch(e){ if(e&&e.name==="AbortError") return; }
+  copyText(text,$("#copyOut")); toast("הפרטים הועתקו");
+}
+async function locateOne(s){
+  try{ const G=await loadGeo(); if(!G) return; gcOffline=false; const startPt=state.startLL||null; await locate(G,s,startPt); save(); render(); drawMap(false);
+    if(s.geo==="none") toast("לא מצאתי את “"+s.addr+"” במפה – בדוק את הכתובת","פרטים",()=>openStop(s),6000);
+  }catch(e){}
+}
+
+/* ---------- rendering ---------- */
+function stopRow(s,opts){
+  const n=idxOf(s), cur=curStop()===s;
+  const li=el("li",{class:"stop"+(s.done?" done":"")+(s.failed?" failed":"")+(cur?" next":"")+(isPick(s)?" pick":"")});
+  li.dataset.id=s.id;
+  li.append(el("span",{class:"num","aria-hidden":"true",text:s.done?"":String(n)}));
+  if(s.done) li.firstChild.append(icon(s.failed?"x":"check"));
+  const sub=[cityOf(s)||"",s.name].filter(Boolean).join(" · ");
+  const chips=el("div",{class:"chips"});
+  if(!s.done){
+    if(s.eta) chips.append(el("span",{class:"chip eta"},icon("clock"),el("span",{text:clock(s.eta)})));
+    if(s.late) chips.append(el("span",{class:"chip late",text:"⚠ מאחר"}));
+    if(s.urgent) chips.append(el("span",{class:"chip urgent",text:"דחוף"}));
+    if(s.last) chips.append(el("span",{class:"chip",text:"אחרון"}));
+    if(isPick(s)) chips.append(el("span",{class:"chip"},icon("pickup"),el("span",{text:"איסוף"})));
+    const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
+    if(spotText(s)) chips.append(el("span",{class:"chip"},icon("box"),el("span",{text:spotText(s)})));
+    if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 לפי עיר בלבד"}));
+    if(s.geo==="none") chips.append(el("span",{class:"chip warn",text:"⚠ לא נמצא במפה"}));
+  } else if(s.failed) chips.append(el("span",{class:"chip fail",text:"לא נמסר"+(s.reason?": "+s.reason:"")}));
+  else chips.append(el("span",{class:"chip ok",text:(isPick(s)?"נאסף":"נמסר")+(s.doneAt?" "+clock(s.doneAt):"")+(s.pod&&s.pod.where?" · "+s.pod.where:"")}));
+  li.append(el("div",{class:"sbody"},el("div",{class:"saddr",text:s.addr}),sub?el("div",{class:"ssub",text:sub}):null,chips.childNodes.length?chips:null));
+  if(!s.done&&opts&&opts.drag){ const g=el("button",{class:"grip",type:"button","aria-label":"גרור כדי לשנות את הסדר"},icon("grip")); g.addEventListener("pointerdown",e=>gripDown(e,li)); g.addEventListener("click",e=>e.stopPropagation()); li.append(g); }
+  li.addEventListener("click",()=>openStop(s));
+  return li;
+}
+function renderPlanHead(){
+  const open=openStops(), total=state.stops.length, done=total-open.length;
+  $("#sumStops").textContent=total?(open.length?open.length+(open.length===1?" עצירה":" עצירות"):"המסלול הושלם"):"אין עצירות";
+  let meta="";
+  if(open.length&&state.sum&&!state.dirty) meta=fmtKm(state.sum.m)+" · "+fmtDur(state.sum.drive)+" נסיעה · סיום ~"+clock(state.sum.finish);
+  else if(open.length>1&&state.dirty) meta="עוד לא מסודר";
+  if(done) meta=(meta?meta+" · ":"")+done+" טופלו";
+  $("#sumMeta").textContent=meta;
+  $("#progBar").style.width=(total?Math.round(done/total*100):0)+"%";
+  const b=$("#mainBtn"); b.disabled=false; b.innerHTML="";
+  if(BUSY){ b.disabled=true; b.append(el("span",{text:"מחשב מסלול…"})); return; }
+  if(!total){ b.append(icon("plus"),el("span",{text:"הוסף עצירה ראשונה"})); b.onclick=()=>$("#q").focus(); return; }
+  if(!open.length){ b.append(icon("flag"),el("span",{text:"סיכום המסלול"})); b.onclick=openFinish; return; }
+  if(state.dirty||!state.sum){ b.className="btn primary block big"; b.append(icon("spark"),el("span",{text:"בצע אופטימיזציה"})); b.onclick=()=>orderGeo(); return; }
+  b.className="btn amber block big"; b.append(icon("nav"),el("span",{text:done?"המשך מסלול":"התחל מסלול"})); b.onclick=startDrive;
+}
+function renderDriveHead(){
+  const box=$("#driveHead"); box.innerHTML="";
+  const s=curStop(), total=state.stops.length, doneN=state.stops.filter(x=>x.done).length;
+  if(!s){
+    const del=state.stops.filter(x=>x.done&&!x.failed).length, fail=state.stops.filter(x=>x.failed).length;
+    box.append(el("div",{class:"finish"},el("h2",{text:"המסלול הושלם 🎉"}),
+      el("div",{class:"stats"},el("div",{},el("b",{text:String(del)}),el("small",{text:"נמסרו"})),el("div",{},el("b",{text:String(fail)}),el("small",{text:"לא נמסרו"})),state.driveStart?el("div",{},el("b",{text:fmtDur((Date.now()-state.driveStart)/1000)}),el("small",{text:"זמן במסלול"})):null),
+      el("div",{class:"dact"},el("button",{class:"btn primary",type:"button",onclick:shareSummary},icon("share"),el("span",{text:" שתף סיכום"})),el("button",{class:"btn ghost",type:"button",onclick:endDrive},el("span",{text:"סיים"})))));
+    return;
+  }
+  const dist=(MY&&s.lat!=null)?fmtKm(km(MY,s)*1000)+" ממך":"";
+  const sub=[cityOf(s),s.eta?"הגעה ~"+clock(s.eta):"",dist].filter(Boolean).join(" · ");
+  const near=arrivedId===s.id;
+  const card=el("div",{class:"dcard"},
+    el("div",{class:"dtop"},el("span",{class:"dnum",text:String(idxOf(s))}),
+      el("div",{class:"dtt"},el("div",{class:"dkicker",text:(isPick(s)?"איסוף · ":"")+"עצירה "+(doneN+1)+" מתוך "+total+(near?" · הגעת":"")}),el("div",{class:"daddr",text:s.addr}),el("div",{class:"dsub",text:sub})),
+      el("button",{class:"iconbtn",type:"button","aria-label":"פרטי העצירה ועריכה",onclick:()=>openStop(s)},icon("edit"))));
+  const chips=el("div",{class:"chips"});
+  if(s.urgent) chips.append(el("span",{class:"chip urgent",text:"דחוף"}));
+  const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
+  if(s.late) chips.append(el("span",{class:"chip late",text:"⚠ מאחר מהשעה שביקשו"}));
+  if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 מיקום לפי עיר בלבד"}));
+  if(chips.childNodes.length) card.append(chips);
+  const sp=spotText(s), cnt=s.pkgs>1?s.pkgs+" חבילות":"";
+  if(sp||cnt||s.pkg) card.append(el("div",{class:"spot"+(near?" hot":"")},icon("box"),el("span",{text:[sp,cnt,s.pkg?"#"+s.pkg:""].filter(Boolean).join(" · ")})));
+  if(s.name||s.phone){
+    const wl=waLink(s);
+    card.append(el("div",{class:"contact"},el("span",{class:"who2",text:s.name||s.phone}),
+      s.phone?el("a",{class:"iconbtn",href:"tel:"+s.phone.replace(/[^\d+]/g,""),"aria-label":"חייג ללקוח"},icon("phone")):null,
+      wl?el("a",{class:"iconbtn",href:wl,target:"_blank",rel:"noopener","aria-label":"הודעת וואטסאפ ללקוח: בדרך אליך"},icon("msg")):null));
+  }
+  if(s.note) card.append(el("div",{class:"note",text:s.note}));
+  card.append(el("button",{class:"btn primary big block",type:"button",onclick:()=>navTo(s)},icon("nav"),el("span",{text:"נווט ב"+({gmaps:"גוגל מפות",apple:"מפות"}[state.navApp]||"Waze")})));
+  card.append(el("div",{class:"dact"},
+    el("button",{class:"btn ok big",type:"button",onclick:()=>openPod(s)},icon("check"),el("span",{text:isPick(s)?"נאסף":"נמסר"})),
+    el("button",{class:"btn fail big",type:"button",onclick:()=>openFail(s)},icon("x"),el("span",{text:"לא נמסר"}))));
+  card.append(el("div",{class:"dmore"},
+    el("button",{class:"btn ghost sm",type:"button",onclick:()=>skipStop(s)},icon("skip"),el("span",{text:"דלג"})),
+    el("button",{class:"btn ghost sm",type:"button",onclick:()=>orderGeo()},icon("spark"),el("span",{text:"סדר מחדש"})),
+    el("button",{class:"btn ghost sm",type:"button",onclick:endDrive},icon("list"),el("span",{text:"תכנון"}))));
+  box.append(card);
+}
+function render(){
+  const driving=!!state.driving;
+  $("#planHead").hidden=driving; $("#driveHead").hidden=!driving;
+  if(driving) renderDriveHead(); else renderPlanHead();
+  $("#exampleBanner").hidden=!state.example;
+  const open=openStops(), done=state.stops.filter(s=>s.done);
+  const list=$("#stops"); list.innerHTML="";
+  const shown=driving?open.slice(1):open;
+  $("#listLbl").textContent=shown.length?(driving?"הבאות בתור":"העצירות לפי הסדר"):"";
+  if(!state.stops.length){
+    list.append(el("li",{class:"empty"},el("div",{text:"אין עדיין עצירות. כותבים כתובת בשורה למעלה, או מייבאים כמה ביחד מוואטסאפ, מצילום או מאקסל."}),
+      el("button",{class:"btn primary",type:"button",onclick:()=>openImport()},icon("plus"),el("span",{text:" ייבוא כתובות"}))));
+  }
+  shown.forEach(s=>list.append(stopRow(s,{drag:true})));
+  const db=$("#doneBox"); db.hidden=!done.length; $("#doneSum").textContent="טופלו ("+done.length+")";
+  const dl=$("#doneList"); dl.innerHTML=""; [...done].sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).forEach(s=>dl.append(stopRow(s)));
+  // settings
+  $("#startAddr").value=state.start||""; $("#defCity").value=state.defCity||"";
+  $("#endMode").value=state.endMode||"none"; $("#endAddr").value=state.endAddr||""; $("#endAddrLbl").hidden=(state.endMode!=="custom");
+  $("#departAt").value=state.departAt||""; $("#courierName").value=state.courier||"";
+  $("#svcMin").value=state.svcMin??3; $("#navApp").value=state.navApp||"waze"; $("#autoNav").checked=!!state.autoNav; $("#needPhoto").checked=!!state.needPhoto;
+  requestAnimationFrame(()=>snap(snapName,true));
+  drawMap(false);
+}
+
+/* ---------- drag to reorder ---------- */
+function gripDown(e,li){
+  e.preventDefault(); e.stopPropagation();
+  const list=$("#stops"); const items=[...list.children].filter(x=>x.dataset&&x.dataset.id);
+  const from=items.indexOf(li); if(from<0) return;
+  const h=li.getBoundingClientRect().height; const y0=e.clientY; let to=from;
+  const g=e.currentTarget; try{ g.setPointerCapture(e.pointerId); }catch(_){}
+  li.classList.add("dragging"); items.forEach(x=>{ if(x!==li) x.classList.add("shift"); });
+  const move=ev=>{ const dy=ev.clientY-y0; li.style.transform="translateY("+dy+"px)"; to=Math.max(0,Math.min(items.length-1,from+Math.round(dy/h)));
+    items.forEach((x,k)=>{ if(x===li) return; let sh=0; if(from<to&&k>from&&k<=to) sh=-h; if(from>to&&k<from&&k>=to) sh=h; x.style.transform=sh?"translateY("+sh+"px)":""; }); };
+  const up=()=>{ g.removeEventListener("pointermove",move); g.removeEventListener("pointerup",up); g.removeEventListener("pointercancel",up);
+    items.forEach(x=>{ x.style.transform=""; x.classList.remove("shift","dragging"); });
+    if(to===from) return;
+    const ids=items.map(x=>x.dataset.id); const [m]=ids.splice(from,1); ids.splice(to,0,m);
+    const byId=new Map(state.stops.map(s=>[s.id,s])); const vis=ids.map(id=>byId.get(id));
+    const head=state.driving?[curStop()].filter(Boolean):[];
+    state.stops=[...head,...vis,...state.stops.filter(s=>s.done)];
+    retime(true); try{ navigator.vibrate&&navigator.vibrate(15); }catch(_){}
+  };
+  g.addEventListener("pointermove",move); g.addEventListener("pointerup",up); g.addEventListener("pointercancel",up);
+}
+
+/* ---------- bottom sheet ---------- */
+const SH=$("#sheet"); let snapName="half";
+function sheetMax(){ return Math.max(240,innerHeight-(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--top"))||10)-64); }
+function headH(){ return $("#grab").offsetHeight+$("#sheetHead").offsetHeight; }
+function vis(name){
+  const H=sheetMax(), hh=headH();
+  if(name==="peek") return Math.min(H,hh+(state.stops.length?6:0));
+  if(name==="full") return H;
+  return Math.min(H,Math.max(hh+Math.min(200,Math.max(0,innerHeight*0.5-hh)),Math.round(innerHeight*0.5)));
+}
+function snap(name,noAnim){
+  snapName=name; const H=sheetMax(); SH.style.height=H+"px";
+  const v=vis(name); SH.classList.toggle("anim",!noAnim); SH.style.transform="translateY("+(H-v)+"px)";
+  $("#sheetBody").style.maxHeight=Math.max(0,v-headH())+"px"; SH.dataset.snap=name; document.documentElement.style.setProperty("--sv",v+"px");
+}
+(function sheetDrag(){
+  let y0=null,t0=0,base=0,H=0,moved=false;
+  const start=e=>{ if(e.target.closest("button,a,input,select,textarea")&&!e.target.closest("#grab")) return; y0=e.clientY; t0=Date.now(); H=sheetMax(); base=H-vis(snapName); moved=false; SH.classList.remove("anim"); try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
+  const mv=e=>{ if(y0==null) return; const dy=e.clientY-y0; if(Math.abs(dy)>4) moved=true; const y=Math.max(0,Math.min(H-vis("peek"),base+dy)); SH.style.transform="translateY("+y+"px)"; };
+  const end=e=>{ if(y0==null) return; const dy=e.clientY-y0, v=dy/Math.max(1,Date.now()-t0); y0=null;
+    if(!moved){ if(e.currentTarget.id==="grab") snap(snapName==="full"?"half":(snapName==="half"?"full":"half")); else snap(snapName); return; }
+    const cur=H-(base+dy); const opts=["peek","half","full"].map(n=>[n,vis(n)]);
+    let pick; if(v<-0.6) pick=snapName==="peek"?"half":"full"; else if(v>0.6) pick=snapName==="full"?"half":"peek"; else pick=opts.sort((a,b)=>Math.abs(a[1]-cur)-Math.abs(b[1]-cur))[0][0];
+    snap(pick); };
+  for(const n of [$("#grab"),$("#sheetHead")]){ n.addEventListener("pointerdown",start); n.addEventListener("pointermove",mv); n.addEventListener("pointerup",end); n.addEventListener("pointercancel",end); }
+  $("#grab").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); snap(snapName==="full"?"half":"full"); } });
+  addEventListener("resize",()=>snap(snapName,true));
+  let lastY=0; $("#sheetBody").addEventListener("scroll",e=>{ const t=e.target.scrollTop; if(snapName==="half"&&t>lastY+30) snap("full"); lastY=t; },{passive:true});
+})();
+
+/* ---------- map ---------- */
+let LMAP=null, LLAYER=null, baseL=null, satL=null, fitPending=true, mapT=null, mapFetch=false, lineBusy=false;
+function initMap(){
+  if(LMAP||!window.L) return !!LMAP;
+  LMAP=L.map("map",{zoomControl:false,attributionControl:true,tap:true}).setView([32.47,34.97],11);
+  LMAP.attributionControl.setPrefix(false); LMAP.attributionControl.setPosition("topleft");
+  baseL=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(LMAP);
+  satL=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Esri, Maxar"});
+  LLAYER=L.layerGroup().addTo(LMAP);
+  return true;
+}
+function drawMap(fetchLine){ mapFetch=mapFetch||!!fetchLine; clearTimeout(mapT); mapT=setTimeout(()=>{ const f=mapFetch; mapFetch=false; paintMap(f); },40); }
+function pinIcon(txt,cls,sz){ return L.divIcon({className:"",html:'<div class="pin '+cls+'">'+txt+'</div>',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}); }
+function mapPad(){ return {paddingTopLeft:[40,120],paddingBottomRight:[36,Math.min(innerHeight*0.6,vis(snapName))+16]}; }
+async function paintMap(fetchLine){
+  if(!initMap()){ $("#map").classList.add("nomap"); return; }
+  LLAYER.clearLayers();
+  const pts=[]; const cur=curStop();
+  if(state.startLL){ L.marker([state.startLL.lat,state.startLL.lon],{icon:pinIcon("⌂","s",30),title:"נקודת יציאה",keyboard:false}).addTo(LLAYER); pts.push([state.startLL.lat,state.startLL.lon]); }
+  state.stops.forEach((s,i)=>{ if(s.lat==null) return;
+    const cls=s.failed?"failed":(s.done?"done":(s===cur?"next":(s.urgent?"urg":"")))+(isPick(s)?" pick":"");
+    const sz=s===cur?38:(s.done?24:30);
+    const m=L.marker([s.lat,s.lon],{icon:pinIcon(s.done?(s.failed?"✕":"✓"):String(i+1),cls,sz),title:full(s),zIndexOffset:s===cur?1000:(s.done?-500:0)}).addTo(LLAYER);
+    m.on("click",()=>openStop(s)); if(!s.done) pts.push([s.lat,s.lon]); });
+  if(state.endLL&&state.endMode!=="start"){ L.marker([state.endLL.lat,state.endLL.lon],{icon:pinIcon("🏁","s",30),title:"סיום",keyboard:false}).addTo(LLAYER); pts.push([state.endLL.lat,state.endLL.lon]); }
+  const seq=[]; const from=(state.driving&&MY)?MY:state.startLL; if(from) seq.push(from);
+  state.stops.forEach(s=>{ if(!s.done&&s.lat!=null) seq.push({lat:s.lat,lon:s.lon}); });
+  if(state.endLL) seq.push(state.endLL);
+  const key=seq.map(p=>(+p.lat).toFixed(4)+","+(+p.lon).toFixed(4)).join(";");
+  if(state.line&&state.lineKey===key) L.polyline(state.line,{color:"#0B6B3A",weight:5,opacity:.85}).addTo(LLAYER);
+  else if(seq.length>=2&&!state.dirty&&!lineBusy&&(fetchLine||state.lineKey!==key)){
+    lineBusy=true; L.polyline(seq.map(p=>[p.lat,p.lon]),{color:"#0B6B3A",weight:3,opacity:.5,dashArray:"6 8"}).addTo(LLAYER);
+    roadLine(seq).then(line=>{ lineBusy=false; if(line){ state.line=line; state.lineKey=key; save(); paintMap(false); } }).catch(()=>{ lineBusy=false; });
+  } else if(seq.length>=2&&state.dirty) L.polyline(seq.map(p=>[p.lat,p.lon]),{color:"#56665D",weight:3,opacity:.45,dashArray:"6 8"}).addTo(LLAYER);
+  if(MY){ if(!myMarker) myMarker=L.marker([MY.lat,MY.lon],{icon:L.divIcon({className:"",html:'<div class="me-dot"></div>',iconSize:[18,18],iconAnchor:[9,9]}),keyboard:false,zIndexOffset:2000,title:"אתה כאן"}); myMarker.setLatLng([MY.lat,MY.lon]).addTo(LMAP); }
+  if(fitPending&&pts.length){ fitPending=false; if(pts.length===1) LMAP.setView(pts[0],15); else LMAP.fitBounds(L.latLngBounds(pts),mapPad()); }
+}
+function fitAll(){ fitPending=true; paintMap(false); if(!state.stops.some(s=>s.lat!=null)&&MY&&LMAP) LMAP.setView([MY.lat,MY.lon],15); }
+function focusCur(){ const s=curStop(); if(!LMAP||!s||s.lat==null) return; const pts=[[s.lat,s.lon]]; if(MY) pts.push([MY.lat,MY.lon]); if(pts.length===1) LMAP.setView(pts[0],16); else LMAP.fitBounds(L.latLngBounds(pts),Object.assign(mapPad(),{maxZoom:16})); }
+let satOn=false;
+$("#layerBtn").addEventListener("click",()=>{ if(!initMap()) return; satOn=!satOn; if(satOn){ LMAP.removeLayer(baseL); satL.addTo(LMAP); } else { LMAP.removeLayer(satL); baseL.addTo(LMAP); } $("#layerBtn").setAttribute("aria-pressed",String(satOn)); });
+$("#fitBtn").addEventListener("click",fitAll);
+
+/* ---------- my location ---------- */
+function onMy(p){
+  MY={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};
+  if(LMAP){ if(!myMarker) paintMap(false); else myMarker.setLatLng([MY.lat,MY.lon]).addTo(LMAP); }
+  const s=curStop();
+  if(state.driving&&s&&s.lat!=null&&km(MY,s)<0.12&&arrivedId!==s.id){
+    arrivedId=s.id; try{ navigator.vibrate&&navigator.vibrate([150,80,150]); }catch(e){}
+    toast("הגעת ל"+s.addr+(spotText(s)?" · החבילה: "+spotText(s):""),null,null,7000); render();
+  } else if(state.driving&&!openId){ const d=$("#driveHead .dsub"); if(d&&s){ d.textContent=[cityOf(s),s.eta?"הגעה ~"+clock(s.eta):"",s.lat!=null?fmtKm(km(MY,s)*1000)+" ממך":""].filter(Boolean).join(" · "); } }
+}
+function startMyWatch(center){
+  if(!("geolocation" in navigator)){ toast("הטלפון לא תומך במיקום."); return; }
+  if(center) navigator.geolocation.getCurrentPosition(p=>{ onMy(p); if(LMAP) LMAP.setView([MY.lat,MY.lon],Math.max(LMAP.getZoom(),15)); },err=>{ if(err.code===1) toast("לא אישרת גישה למיקום. אפשר לאשר בהגדרות הדפדפן."); },{enableHighAccuracy:true,timeout:15000,maximumAge:20000});
+  if(myWatch==null) myWatch=navigator.geolocation.watchPosition(onMy,()=>{},{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
+}
+function stopMyWatch(){ if(myWatch!=null&&!state.driving){ navigator.geolocation.clearWatch(myWatch); myWatch=null; } }
+$("#locBtn").addEventListener("click",()=>startMyWatch(true));
+
+/* ---------- driving mode ---------- */
+let wakeDrive=null;
+async function startDrive(){
+  if(!openStops().length) return;
+  if(state.dirty||!state.sum){ await orderGeo(); }
+  state.driving=true; if(!state.driveStart) state.driveStart=Date.now(); arrivedId=null; save();
+  startMyWatch(false); setStatus("");
+  try{ navigator.wakeLock&&navigator.wakeLock.request("screen").then(l=>wakeDrive=l).catch(()=>{}); }catch(e){}
+  render(); snap("half"); focusCur();
+}
+function endDrive(){
+  state.driving=false; if(!openStops().length) state.driveStart=null; save();
+  try{ wakeDrive&&wakeDrive.release(); }catch(e){} wakeDrive=null;
+  render(); snap("half"); fitAll();
+}
+addEventListener("visibilitychange",()=>{ if(!document.hidden&&state.driving){ try{ navigator.wakeLock&&navigator.wakeLock.request("screen").then(l=>wakeDrive=l).catch(()=>{}); }catch(e){} } });
+function summaryText(){
+  const d=new Date().toLocaleDateString("he-IL"); const del=state.stops.filter(x=>x.done&&!x.failed), fail=state.stops.filter(x=>x.failed), open=openStops();
+  const L2=["*סיכום מסלול "+d+"*"+(state.courier?" – "+state.courier:""),"נמסרו: "+del.length+" · לא נמסרו: "+fail.length+(open.length?" · פתוחות: "+open.length:"")];
+  if(fail.length){ L2.push("","*לא נמסרו:*"); fail.forEach(s=>L2.push("• "+full(s)+(s.name?" – "+s.name:"")+(s.reason?" ("+s.reason+")":""))); }
+  if(open.length){ L2.push("","*עוד פתוחות:*"); open.forEach(s=>L2.push("• "+full(s))); }
+  return L2.join("\n");
+}
+async function shareSummary(){ const t=summaryText(); try{ if(navigator.share){ await navigator.share({text:t}); return; } }catch(e){ if(e&&e.name==="AbortError") return; } location.href="https://wa.me/?text="+encodeURIComponent(t); }
+function openFinish(){
+  const del=state.stops.filter(x=>x.done&&!x.failed).length, fail=state.stops.filter(x=>x.failed).length;
+  dyn("סיכום המסלול",el("div",{class:"stats"},el("div",{},el("b",{text:String(del)}),el("small",{text:"נמסרו"})),el("div",{},el("b",{text:String(fail)}),el("small",{text:"לא נמסרו"}))),
+    el("div",{class:"actions"},el("button",{class:"btn primary block",type:"button",onclick:shareSummary},icon("share"),el("span",{text:" שתף סיכום בוואטסאפ"}))),
+    (!ME)?el("div",{class:"actions"},el("button",{class:"btn ghost block",type:"button",onclick:()=>{ closeSheets(); newRoute(); }},el("span",{text:"מסלול חדש"}))):null);
+}
+
+/* ---------- history of past routes (on this phone) ---------- */
+const HKEY="courier-route-history";
+function hLoad(){ try{ return JSON.parse(localStorage.getItem(HKEY)||"[]"); }catch(e){ return []; } }
+function archive(){
+  if(state.example||!state.stops.length) return;
+  const h=hLoad(); h.unshift({t:Date.now(),c:state.courier||"",x:state.stops.map(s=>({a:full(s),n:s.name||"",st:s.done?(s.failed?"f":"d"):"o",r:s.failed?s.reason:podText(s),at:s.doneAt||null}))});
+  try{ localStorage.setItem(HKEY,JSON.stringify(h.slice(0,30))); }catch(e){}
+}
+function newRoute(){
+  archive(); state.stops=[]; state.example=false; state.driving=false; state.sum=null; state.dirty=false; state.line=null; state.lineKey=null; state.driveStart=null;
+  save(); render(); fitPending=true; $("#gmapsLinks").hidden=true; setStatus(""); toast("מסלול חדש – המסלול הקודם נשמר ב'מסלולים קודמים'");
+}
+function openHistory(){
+  const h=hLoad();
+  const box=el("div",{});
+  if(!h.length) box.append(el("p",{class:"hint",text:"עוד אין מסלולים שמורים. כל מסלול שמנקים נשמר כאן."}));
+  h.forEach(r=>{ const d=r.x.filter(x=>x.st==="d").length, f=r.x.filter(x=>x.st==="f").length;
+    const det=el("details",{class:"hist"},el("summary",{text:new Date(r.t).toLocaleString("he-IL",{weekday:"short",day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})+" · "+r.x.length+" עצירות · "+d+" נמסרו"+(f?" · "+f+" לא":"")}));
+    const ol=el("ol",{}); r.x.forEach(x=>ol.append(el("li",{text:x.a+(x.n?" – "+x.n:"")+" · "+(x.st==="d"?"נמסר":(x.st==="f"?"לא נמסר":"פתוח"))+(x.at?" "+clock(x.at):"")+(x.r?" ("+x.r+")":"")})));
+    det.append(ol); box.append(det); });
+  dyn("מסלולים קודמים",box);
+}
+
+/* ---------- search bar: add a stop by typing ---------- */
+const QIN=$("#q"), SUG=$("#suggest"); let sugT=null, sugSeq=0;
+function hideSug(){ SUG.hidden=true; SUG.innerHTML=""; }
+async function suggest(text){
+  const my=++sugSeq; const t=text.trim();
+  if(t.length<2){ hideSug(); return; }
+  const G=await loadGeo(); if(my!==sugSeq) return;
+  const out=[];
+  if(G){
+    const num=(t.match(/\d+[א-ת]?/)||[""])[0];
+    const city=findCity(G,t);
+    let st=" "+gnorm(t.replace(/\d+[א-ת]?/g," ").replace(/,/g," "))+" ";
+    if(city) st=st.replace(" "+city.n+" "," ");
+    st=st.trim().replace(/^(רחוב|רח)\s+/,"");
+    if(st.length>=2){
+      const res=[];
+      for(const [k,pts] of G.st){ let sc=-1; if(k===st) sc=0; else if(k.startsWith(st)) sc=1; else if(k.includes(" "+st)) sc=2; else if(st.length>=3&&k.includes(st)) sc=3; if(sc>=0) res.push({k,pts,sc}); }
+      res.sort((a,b)=>a.sc-b.sc||a.k.length-b.k.length);
+      const ref=city||state.startLL||MY||null; const seen=new Set(); const cand=[];
+      for(const r of res.slice(0,30)){
+        for(const [lat,lon] of r.pts.slice(0,40)){ const o=ownerOf(G,{lat,lon}); if(!o) continue; const tn=o.name; if(city&&!groupOf(city.name).includes(tn)&&km({lat,lon},city)>3) continue; const kk=r.k+"|"+tn; if(seen.has(kk)) continue; seen.add(kk);
+          cand.push({street:(G.disp&&G.disp.get(r.k))||r.k,town:tn,sc:r.sc,d:ref?km({lat,lon},ref):0}); }
+      }
+      cand.sort((a,b)=>a.sc-b.sc||a.d-b.d); cand.slice(0,6).forEach(c=>out.push({addr:c.street+(num?" "+num:""),city:c.town}));
+    }
+  }
+  SUG.innerHTML="";
+  const add=(label,sub,fn,ic0)=>{ const b=el("button",{type:"button",role:"option"},icon(ic0||"search"),el("span",{},el("b",{text:label}),sub?el("small",{text:sub}):null)); b.addEventListener("mousedown",e=>e.preventDefault()); b.addEventListener("click",fn); SUG.append(b); };
+  out.forEach(o=>add(o.addr+", "+o.city,!/\d/.test(o.addr)?"אפשר להוסיף מספר בית":"",()=>addTyped(o.addr,o.city),"plus"));
+  add("“"+t+"”","הוסף בדיוק כפי שנכתב",()=>addTyped(t,""),"edit");
+  SUG.append(el("div",{class:"imp"},
+    el("button",{class:"btn ghost sm",type:"button",onclick:()=>{ hideSug(); openImport("tab-wa"); }},icon("msg"),el("span",{text:" הדבקה מוואטסאפ"})),
+    el("button",{class:"btn ghost sm",type:"button",onclick:()=>{ hideSug(); openImport("tab-img"); }},icon("camera"),el("span",{text:" צילום"})),
+    el("button",{class:"btn ghost sm",type:"button",onclick:()=>{ hideSug(); openImport("tab-xl"); }},icon("list"),el("span",{text:" אקסל"}))));
+  SUG.hidden=false;
+}
+function addTyped(addr,city){
+  const fl=parseFlags(addr); const a=cleanFlags(addr)||addr;
+  const before=state.stops.length; const added=addStops([{addr:a,city,urgent:fl.urgent,after:fl.after,before:fl.before}]);
+  QIN.value=""; hideSug(); QIN.blur();
+  const s=added&&added[0];
+  if(s){ toast("נוספה עצירה: "+full(s),"פרטים",()=>openStop(s),5000); fitPending=state.stops.length<=1; locateOne(s); }
+  else if(state.stops.length===before) toast("הכתובת כבר במסלול");
+}
+QIN.addEventListener("input",()=>{ clearTimeout(sugT); sugT=setTimeout(()=>suggest(QIN.value),120); });
+QIN.addEventListener("focus",()=>{ if(QIN.value.trim().length>=2) suggest(QIN.value); });
+QIN.addEventListener("blur",()=>setTimeout(()=>{ if(document.activeElement!==QIN) hideSug(); },180));
+QIN.addEventListener("paste",e=>{ const t=(e.clipboardData&&e.clipboardData.getData("text"))||""; if(/\n/.test(t.trim())){ e.preventDefault(); hideSug(); openImport("tab-wa"); $("#waText").value=t; showWaPreview(parseWhatsApp(t)); } });
+$("#searchForm").addEventListener("submit",e=>{ e.preventDefault(); const t=QIN.value.trim(); if(t) addTyped(t,""); });
+(function voice(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR) return;
+  const b=$("#micBtn"); b.hidden=false; let rec=null;
+  b.addEventListener("click",()=>{
+    if(rec){ rec.stop(); return; }
+    rec=new SR(); rec.lang="he-IL"; rec.interimResults=true; rec.maxAlternatives=1; b.classList.add("rec");
+    rec.onresult=e=>{ const r=[...e.results].map(x=>x[0].transcript).join(" "); QIN.value=r; suggest(r); };
+    rec.onerror=e=>{ if(e.error==="not-allowed") toast("לא אושר שימוש במיקרופון."); };
+    rec.onend=()=>{ rec=null; b.classList.remove("rec"); QIN.focus(); };
+    try{ rec.start(); }catch(e){ rec=null; b.classList.remove("rec"); }
+  });
+})();
+
+/* ---------- menu & import sheet ---------- */
+function openImport(tab){ showTab(tab||"tab-wa"); openSheet("importSheet"); }
+$("#importBtn").addEventListener("click",()=>openImport());
+$("#impBtn2").addEventListener("click",()=>openImport());
+$("#mImport").addEventListener("click",()=>openImport());
+$("#menuBtn").addEventListener("click",()=>openSheet("menu"));
+$("#mReopt").addEventListener("click",()=>{ closeSheets(); orderGeo(); });
+$("#mReverse").addEventListener("click",reverseRoute);
+$("#mHistory").addEventListener("click",openHistory);
+$("#mNew").addEventListener("click",e=>{ const b=e.currentTarget; if(b.dataset.arm!=="1"){ b.dataset.arm="1"; b.lastChild.textContent="בטוח? לחץ שוב לניקוי"; setTimeout(()=>{ b.dataset.arm=""; b.lastChild.textContent="מסלול חדש (ניקוי)"; },4000); return; } b.dataset.arm=""; b.lastChild.textContent="מסלול חדש (ניקוי)"; closeSheets(); newRoute(); });
+$("#svcMin").addEventListener("change",e=>{ state.svcMin=e.target.value===""?3:Math.max(0,+e.target.value); applySettings(); state.dirty=true; save(); render(); });
+$("#navApp").addEventListener("change",e=>{ state.navApp=e.target.value; save(); render(); });
+$("#autoNav").addEventListener("change",e=>{ state.autoNav=e.target.checked; save(); });
+$("#needPhoto").addEventListener("change",e=>{ state.needPhoto=e.target.checked; save(); });
+for(const id of ["startAddr","defCity","endMode","endAddr","departAt"]) $("#"+id).addEventListener("change",()=>{ if(state.stops.length){ state.dirty=true; save(); renderPlanHead(); } });
+for(const id of ["waAdd","imgAdd","xlAdd"]) $("#"+id).addEventListener("click",()=>{ closeSheets(); fitPending=true; drawMap(false); setTimeout(()=>{ if(state.dirty&&openStops().length>1) toast("הכתובות נוספו. עכשיו לחץ 'בצע אופטימיזציה'","סדר עכשיו",()=>orderGeo(),7000); },50); });
+$("#manForm").addEventListener("submit",()=>{ const s=state.stops[state.stops.length-1]; if(s&&s.lat==null) locateOne(s); });
+$("#clearExample").addEventListener("click",()=>{ state.sum=null; state.dirty=false; state.line=null; state.lineKey=null; fitPending=true; save(); render(); });
+
+/* ---------- wiring (inputs) ---------- */
 $("#today").textContent=new Date().toLocaleDateString("he-IL",{weekday:"long",day:"numeric",month:"numeric"});
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>{x.setAttribute("aria-selected",String(x===t)); $("#"+x.getAttribute("aria-controls")).hidden=x!==t;});
@@ -1229,7 +1952,6 @@ $("#endMode").addEventListener("change",e=>{state.endMode=e.target.value;save();
 $("#endAddr").addEventListener("change",e=>{state.endAddr=e.target.value.trim();save();});
 $("#departAt").addEventListener("change",e=>{state.departAt=e.target.value||"";save();});
 $("#courierName").addEventListener("change",e=>{state.courier=e.target.value.trim();save();});
-$("#mapBtn").addEventListener("click",()=>{ const b=$("#mapBox"); b.hidden=!b.hidden; $("#mapBtn").textContent=b.hidden?"מפה":"סגור מפה"; if(!b.hidden) drawMap(false); });
 $("#splitBtn").addEventListener("click",splitCrew);
 $("#installBtn").addEventListener("click",async()=>{
   const ev=deferredPrompt; deferredPrompt=null;
@@ -1243,17 +1965,9 @@ $("#installBtn").addEventListener("click",async()=>{
 });
 $("#installClose").addEventListener("click",()=>{ $("#installBanner").hidden=true; try{ localStorage.setItem("courier-install-closed","1"); }catch(e){} });
 $("#trackHint").textContent=TRACK.url?"כל לחיצה על 'נמסר' או 'לא נמסר' נרשמת בגיליון המעקב של המנהל.":"";
-$("#orderGeo").addEventListener("click",orderGeo);
 $("#openGmaps").addEventListener("click",gmapsRoutes);
 $("#copyWa").addEventListener("click",copyForWhatsApp);
 $("#clearExample").addEventListener("click",()=>{ state.stops=[]; state.example=false; save(); render(); setStatus("המסלול ריק. הוסף כתובות למעלה."); });
-let armed=null;
-$("#clearAll").addEventListener("click",e=>{
-  const b=e.currentTarget;
-  if(!armed){ b.textContent="בטוח? לחץ שוב"; armed=setTimeout(()=>{armed=null;b.textContent="נקה הכל";},4000); return; }
-  clearTimeout(armed); armed=null; b.textContent="נקה הכל";
-  state.stops=[]; state.example=false; save(); render(); $("#gmapsLinks").hidden=true; setStatus("המסלול נוקה.");
-});
 /* ================= cloud (server) mode ================= */
 const C=window.Cloud; let ME=null, chan=null, pullTimer=null, geoWatch=null, lastSent=null, wakeLock=null;
 function gate(html,bind){ $("#gate").hidden=false; $("#gateCard").innerHTML=html; if(bind) bind(); }
@@ -1308,7 +2022,7 @@ function showConsent(){
   });
 }
 async function logout(){ await stopShift(true); try{ await C.sb.auth.signOut(); }catch(e){} ME=null; if(chan){ C.sb.removeChannel(chan); chan=null; }
-  state={start:"",defCity:"פרדס חנה-כרכור",example:false,stops:[]}; save(); render(); showLogin(); }
+  state={start:"",defCity:"פרדס חנה-כרכור",example:false,stops:[],dirty:false}; save(); render(); showLogin(); }
 async function boot(){
   clearTimeout(pullTimer);
   let p=null; try{ p=await C.me(); }catch(e){ if(ME){ return; } gate(LOGO+`<h2>אין חיבור</h2><p>${C.errText(e)}</p><button class="btn primary" id="gRe" type="button">נסה שוב</button>`,()=>{$("#gRe").onclick=boot;}); return; }
@@ -1317,9 +2031,9 @@ async function boot(){
   if(p.status!=="active") return showPending();
   if(!p.consent_at && p.role!=="admin") { ME=p; return showConsent(); }
   const first=!ME||ME.id!==p.id; ME=p; closeGate();
-  state.courier=p.full_name||state.courier; state.example=false; save();
+  if(state.example){ state.stops=[]; state.sum=null; state.dirty=false; } state.courier=p.full_name||state.courier; state.example=false; save();
   $("#who").hidden=false; $("#whoName").textContent=p.full_name||""; $("#adminLink").hidden=p.role!=="admin";
-  $("#mgr").closest("section").hidden=true; $("#clearAll").hidden=true; $("#courierName").closest("label").hidden=true;
+  document.querySelectorAll(".solo").forEach(x=>x.hidden=true);
   C.sb.from("profiles").update({last_seen:new Date().toISOString()}).eq("id",p.id).then(()=>{});
   if(first){
     chan=C.sb.channel("del-"+p.id).on("postgres_changes",{event:"*",schema:"public",table:"deliveries",filter:"assigned_to=eq."+p.id},()=>{ clearTimeout(pullTimer); pullTimer=setTimeout(pull,600); })
@@ -1359,7 +2073,8 @@ async function pull(){
     // open first, then done – keep the courier's order
     state.stops=[...kept.filter(s=>!s.done),...kept.filter(s=>s.done)];
     save(); render();
-    if(added&&!state._quiet){ setStatus("התקבלו "+added+" משלוחים חדשים מהמנהל. לחץ 'סדר מסלול קצר'."); try{ navigator.vibrate&&navigator.vibrate([200,100,200]); }catch(e){} }
+    if(added){ state.dirty=true; save(); render(); }
+    if(added&&!state._quiet){ setStatus("התקבלו "+added+" משלוחים חדשים מהמנהל. לחץ 'בצע אופטימיזציה'."); toast("התקבלו "+added+" משלוחים חדשים מהמנהל","סדר עכשיו",()=>orderGeo(),8000); try{ navigator.vibrate&&navigator.vibrate([200,100,200]); }catch(e){} }
     else if(removed){ setStatus(removed+" משלוחים הוסרו מהמסלול שלך על ידי המנהל."); }
     state._quiet=false;
   }catch(e){ /* offline – keep local */ }
@@ -1375,7 +2090,7 @@ let flushingQ=false;
 async function flushQ(){
   if(!ME||flushingQ) return; flushingQ=true;
   try{ let q=qGet();
-    while(q.length){ const x=q[0]; const { error }=await C.sb.from("deliveries").update(x.patch).eq("id",x.rid); if(error&&/fetch|network/i.test(error.message||"")) break; q.shift(); qSet(q); }
+    while(q.length){ const x=q[0]; const { error }=await C.sb.from("deliveries").update(x.patch).eq("id",x.rid); if(error&&/fetch|network/i.test(error.message||"")) break; q=qGet(); q.shift(); qSet(q); } // re-read: items may have been queued while we waited
   }catch(e){} finally{ flushingQ=false; }
 }
 addEventListener("online",()=>{ flushQ(); if(ME) pull(); });
@@ -1402,6 +2117,7 @@ function startWatch(){
 }
 let lastPos=null;
 async function onPos(p){
+  try{ onMy(p); }catch(e){}
   if(!ME||!state.shift) return;
   const c={lat:p.coords.latitude,lon:p.coords.longitude}; lastPos=c;
   const now=Date.now();
@@ -1424,7 +2140,7 @@ render();
 setTimeout(showInstall,1500);
 if(C.on){ TRACK.url=""; boot(); } else { flushTrack(); }
 importFromHash();
-
+if(state.driving) startMyWatch(false);
 (async()=>{
   try{
     if(!window.claude||!claude.use) return;
