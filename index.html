@@ -327,7 +327,7 @@ textarea{min-height:110px;resize:vertical}
     <button class="mi" type="button" id="copyWa"><span class="i" data-i="msg"></span>העתק את המסלול לוואטסאפ</button>
     <textarea id="copyOut" class="copyout" hidden readonly aria-label="טקסט להעתקה"></textarea>
     <button class="mi" type="button" id="mHistory"><span class="i" data-i="clock"></span>מסלולים קודמים</button>
-    <button class="mi danger solo" type="button" id="mNew"><span class="i" data-i="trash"></span>מסלול חדש (ניקוי)</button>
+    <button class="mi danger" type="button" id="mNew"><span class="i" data-i="trash"></span>ניקוי המסלול</button>
   </div>
   <div class="dr-sec">
     <h3>הגדרות</h3>
@@ -745,11 +745,13 @@ async function nomi(params){
     if(!r.ok) throw new Error("http"); return await r.json();
   }finally{ clearTimeout(t); }
 }
+let NOMI_LEFT=Infinity, NOMI_SKIPPED=0; // OpenStreetMap allows 1 lookup a second – big lists get a budget so nothing waits minutes
 async function preciseGeocode(G,text,defCity){
   const {street,city}=splitAddr(text,defCity); if(!street) return null;
   const key=gnorm(street+"|"+city); const C=gcLoad();
   if(C[key]!==undefined) return C[key];
   if(gcOffline) return null;
+  if(NOMI_LEFT<=0){ NOMI_SKIPPED++; return null; } NOMI_LEFT--;
   const hasNum=/\d/.test(street);
   let res=null;
   try{
@@ -827,13 +829,13 @@ function heldKarp(M,set,from,end){
   const ord=[]; let S=FULL-1, j=best; while(j>=0){ ord.push(set[j]); const pj=par[S*k+j]; S&=~(1<<j); j=pj; }
   return ord.reverse();
 }
-function improve(costFn,ord){
-  let best=ord.slice(), bc=costFn(best), better=true, guard=0;
-  while(better&&guard++<80){
+function improve(costFn,ord,deadline){
+  let best=ord.slice(), bc=costFn(best), better=true, guard=0; deadline=deadline||Infinity;
+  while(better&&guard++<80&&performance.now()<deadline){
     better=false; const n=best.length;
-    for(let i=0;i<n-1&&!better;i++) for(let k=i+1;k<n;k++){
+    for(let i=0;i<n-1&&!better;i++){ if(performance.now()>deadline) return best; for(let k=i+1;k<n;k++){
       const c=best.slice(0,i).concat(best.slice(i,k+1).reverse(),best.slice(k+1)); const cc=costFn(c);
-      if(cc+1e-6<bc){ best=c; bc=cc; better=true; break; } }
+      if(cc+1e-6<bc){ best=c; bc=cc; better=true; break; } } }
     for(let L=1;L<=3&&!better;L++) for(let i=0;i+L<=n&&!better;i++){
       const seg=best.slice(i,i+L), rest=best.slice(0,i).concat(best.slice(i+L));
       for(let p=0;p<=rest.length;p++){ if(p===i) continue; const c=rest.slice(0,p).concat(seg,rest.slice(p)); const cc=costFn(c);
@@ -857,12 +859,13 @@ function solveSet(M,set,from,end,t0,W){
     dfs(from,t0,0); return best;
   }
   let best=null, bc=1e18;
-  const seeds=[null,...set.filter(i=>W[i]).slice(0,6),...set.filter(i=>!W[i]).slice(0,4)];
+  const big=set.length>40, deadline=performance.now()+(set.length>100?2500:big?4000:8000); // never freeze the phone on a long list
+  const seeds=big?[null,...set.filter(i=>W[i]).slice(0,1)]:[null,...set.filter(i=>W[i]).slice(0,6),...set.filter(i=>!W[i]).slice(0,4)];
   for(const seed of seeds){ // nearest neighbour, optionally forcing the earliest window first
     const left=new Set(set), ord=[]; let cur=from;
     if(seed!=null){ ord.push(seed); left.delete(seed); cur=seed; }
     while(left.size){ let b=-1,bd=1e18; for(const i of left){ if(M[cur][i]<bd){bd=M[cur][i];b=i;} } ord.push(b); left.delete(b); cur=b; }
-    const o=improve(costFn,ord), c=costFn(o); if(c<bc){bc=c;best=o;}
+    const o=improve(costFn,ord,deadline), c=costFn(o); if(c<bc){bc=c;best=o;}
   }
   return best;
 }
@@ -922,6 +925,11 @@ async function orderGeo(){
     const endPt=state.endMode==="start"?startPt:(endText?await placeOf(G,endText):null);
     state.startLL=startPt?{lat:startPt.lat,lon:startPt.lon}:null; state.endLL=endPt?{lat:endPt.lat,lon:endPt.lon}:null;
     const routeStart=(state.driving&&MY)?{lat:MY.lat,lon:MY.lon}:state.startLL;
+    // many new addresses: look them all up at once through the server (seconds instead of minutes)
+    { const C0=gcLoad(), seenK=new Set(), todo=[];
+      for(const s of open){ if(s.lat!=null&&s.gk===full(s)) continue; const sp=splitAddr(full(s),state.defCity); if(!sp.street) continue; const key=gnorm(sp.street+"|"+sp.city); if(C0[key]!==undefined||seenK.has(key)) continue; seenK.add(key); todo.push({key,q:sp.street+(sp.city?", "+sp.city:""),street:sp.street,city:sp.city}); }
+      if(todo.length>3){ setStatus("מאתר "+todo.length+" כתובות במפה..."); await serverGeocode(G,todo,(d,t)=>setStatus("מאתר כתובות במפה ("+d+"/"+t+")...")); } }
+    NOMI_LEFT=25; NOMI_SKIPPED=0;
     const located=[], lost=[]; let k=0;
     for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g) located.push(s); else lost.push(s); }
     setStatus("מחשב את המסלול הקצר ביותר לפי כבישים...");
@@ -942,18 +950,19 @@ async function orderGeo(){
     if(r.traffic) msg="המסלול המהיר ביותר עם תנועה בזמן אמת: כ־"+Math.round(r.meters/1000)+" ק״מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(r.delay>120?" (מתוכן כ־"+Math.round(r.delay/60)+" דקות בגלל עומסים)":"")+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+".";
     else if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
     else msg="אין חיבור לשרת הכבישים, לכן סודר לפי קו אווירי: כ־"+Math.round(r.meters/1000)+" ק\"מ משוער.";
-    msg+=" "+exactN+" מתוך "+open.length+" אותרו עד רמת הבית"+(gcOffline?" (אין חיבור לשירות המפות – השאר לפי רחוב)":"")+".";
+    msg+=" "+exactN+" מתוך "+open.length+" אותרו עד רמת הבית"+(gcOffline&&exactN<open.length?" (אין חיבור לשירות המפות – השאר לפי רחוב)":"")+".";
     if(open.some(s=>s.urgent)) msg+=" משלוחים דחופים בהתחלה.";
     if(lateN) msg+=" ⚠ "+lateN+" עצירות יגיעו אחרי השעה שביקשו – אפשר להזיז ידנית.";
     if(!startPt) msg+=" כדאי למלא נקודת יציאה – אז המסלול מתחיל ממנה.";
     if(approx) msg+=" "+approx+" אותרו רק לפי העיר (מסומנות).";
     if(lost.length) msg+=" "+lost.length+" לא נמצאו במפה והועברו לסוף – בדוק אותן.";
+    if(NOMI_SKIPPED) msg+=" "+NOMI_SKIPPED+" כתובות מוקמו בינתיים לפי רחוב (כדי לא לחכות). 'סדר מחדש' בעוד רגע ידייק עוד.";
     setStatus(msg);
     drawMap(true); if(state.driving) focusCur();
     cloudPushOrder();
     return r;
   }catch(e){ setStatus("החישוב נכשל. נסה שוב."); }
-  finally{ BUSY=false; render(); }
+  finally{ BUSY=false; NOMI_LEFT=Infinity; render(); }
 }
 /* ---------- message to customer ---------- */
 function intlPhone(p){ let d=String(p||"").replace(/[^\d+]/g,""); if(d.startsWith("+")) d=d.slice(1); else if(d.startsWith("0")) d="972"+d.slice(1); return d.length>=11?d:""; }
@@ -1337,6 +1346,33 @@ async function trafficRefine(r,groups,start,end,t0){
   ord.forEach((gi,k)=>{ const lg=(k===0&&!start)?{t:0,d:0}:legAt(k); t+=lg.t; drive+=lg.t; meters+=lg.d; const w=W(groups[gi]); if(w.a!=null&&t<w.a){ wait+=w.a-t; t=w.a; } L.push(lg.t); E.push(t); La.push(w.b!=null&&t>w.b); t+=groups[gi].p.svc??SVC; });
   if(end){ const lg=legs[legs.length-1]; t+=lg.t; drive+=lg.t; meters+=lg.d; }
   return Object.assign({},r,{ord,legs:L,etas:E,lates:La,meters,drive,wait,finish:t,sec:t-t0,traffic:true,delay:(legs.reduce((a,l)=>a+(l.delay||0),0))});
+}
+
+/* ---------- fast address lookup for many stops at once (TomTom through our server function) ---------- */
+let geoOff=0;
+async function serverGeocode(G,todo,onProg){
+  if(!ME||!window.Cloud||!Cloud.sb||Date.now()<geoOff||!todo.length) return 0;
+  const C0=gcLoad(); let done=0;
+  for(let i=0;i<todo.length;i+=50){
+    const part=todo.slice(i,i+50);
+    let res=null;
+    try{ res=await Promise.race([Cloud.sb.functions.invoke("tomtom-route",{body:{geocode:part.map(x=>({q:x.q}))}}),new Promise(r=>setTimeout(()=>r({error:{message:"timeout"}}),30000))]); }catch(e){ res=null; }
+    if(!res||res.error||!res.data||!Array.isArray(res.data.geo)){ geoOff=Date.now()+10*60000; break; }
+    res.data.geo.forEach((arr,k)=>{
+      const it=part[k]; if(!Array.isArray(arr)) return;
+      const hasNum=/\d/.test(it.street); let best=null;
+      for(const c of arr){
+        if(!isFinite(+c.lat)) continue;
+        if(it.city&&!cityOk(G,it.city,+c.lat,+c.lon,{m:c.city,s:c.sub})) continue;
+        const house=/Point Address|Address Range/.test(c.type||"")&&hasNum, road=/Street|Cross Street|Address Range/.test(c.type||"");
+        if(house){ best={lat:+c.lat,lon:+c.lon,q:"house"}; break; }
+        if(road&&!best) best={lat:+c.lat,lon:+c.lon,q:"street"};
+      }
+      if(best){ C0[it.key]=best; done++; }
+    });
+    gcSave(); if(onProg) onProg(Math.min(todo.length,i+50),todo.length);
+  }
+  return done;
 }
 
 /* ---------- delivery photos & signatures → private server storage ---------- */
@@ -1912,8 +1948,14 @@ function archive(){
   try{ localStorage.setItem(HKEY,JSON.stringify(h.slice(0,30))); }catch(e){}
 }
 function newRoute(){
-  archive(); state.stops=[]; state.example=false; state.driving=false; state.sum=null; state.dirty=false; state.line=null; state.lineKey=null; state.driveStart=null;
-  save(); render(); fitPending=true; $("#gmapsLinks").hidden=true; setStatus(""); toast("מסלול חדש – המסלול הקודם נשמר ב'מסלולים קודמים'");
+  archive(); let kept=[];
+  if(ME){ // on the server: cancel the stops this courier added; stops the manager assigned stay (only he can remove them)
+    for(const s of state.stops){ if(s.done) continue; if(s.rid&&!s.mine){ kept.push(s); continue; } if(s.rid) cloudPatch(s,{status:"cancelled"}); }
+    state.clearedAt=Date.now();
+  }
+  state.stops=kept; state.example=false; state.driving=false; state.sum=null; state.dirty=kept.length>0; state.line=null; state.lineKey=null; state.driveStart=null;
+  save(); render(); fitPending=true; $("#gmapsLinks").hidden=true; setStatus("");
+  toast(kept.length?("המסלול נוקה. "+kept.length+" משלוחים ששובצו על ידי המנהל נשארו – רק המנהל יכול להסיר אותם."):"המסלול נוקה – הקודם נשמר ב'מסלולים קודמים'",null,null,6000);
 }
 function openHistory(){
   const h=hLoad();
@@ -1997,7 +2039,7 @@ $("#menuBtn").addEventListener("click",()=>openSheet("menu"));
 $("#mReopt").addEventListener("click",()=>{ closeSheets(); orderGeo(); });
 $("#mReverse").addEventListener("click",reverseRoute);
 $("#mHistory").addEventListener("click",openHistory);
-$("#mNew").addEventListener("click",e=>{ const b=e.currentTarget; if(b.dataset.arm!=="1"){ b.dataset.arm="1"; b.lastChild.textContent="בטוח? לחץ שוב לניקוי"; setTimeout(()=>{ b.dataset.arm=""; b.lastChild.textContent="מסלול חדש (ניקוי)"; },4000); return; } b.dataset.arm=""; b.lastChild.textContent="מסלול חדש (ניקוי)"; closeSheets(); newRoute(); });
+$("#mNew").addEventListener("click",e=>{ const b=e.currentTarget; if(b.dataset.arm!=="1"){ b.dataset.arm="1"; b.lastChild.textContent="בטוח? לחץ שוב לניקוי"; setTimeout(()=>{ b.dataset.arm=""; b.lastChild.textContent="ניקוי המסלול"; },4000); return; } b.dataset.arm=""; b.lastChild.textContent="ניקוי המסלול"; closeSheets(); newRoute(); });
 $("#svcMin").addEventListener("change",e=>{ state.svcMin=e.target.value===""?3:Math.max(0,+e.target.value); applySettings(); state.dirty=true; save(); render(); });
 $("#navApp").addEventListener("change",e=>{ state.navApp=e.target.value; save(); render(); });
 $("#autoNav").addEventListener("change",e=>{ state.autoNav=e.target.checked; save(); });
@@ -2144,9 +2186,12 @@ async function pull(){
   try{
     await flushQ();
     // local stops not yet on the server → insert
-    for(const s of state.stops.filter(x=>!x.rid)){
-      const { data, error }=await C.sb.from("deliveries").insert({created_by:ME.id,assigned_to:ME.id,status:s.done?(s.failed?"failed":"delivered"):"assigned",addr:s.addr,city:s.city||"",cust_name:s.name||"",cust_phone:s.phone||"",note:s.note||"",urgent:!!s.urgent,after_t:s.after||"",before_t:s.before||"",lat:s.lat??null,lon:s.lon??null,geo:s.geo||null,...extraCols(s),pod:s.done?podCol(s):null}).select("id").single();
-      if(!error&&data){ s.rid=data.id; s.mine=true; }
+    const fresh=state.stops.filter(x=>!x.rid);
+    for(let i=0;i<fresh.length;i+=100){ // in batches – a big Excel file is one request per 100 stops, not one per stop
+      const part=fresh.slice(i,i+100);
+      const { data, error }=await C.sb.from("deliveries").insert(part.map(s=>({created_by:ME.id,assigned_to:ME.id,status:s.done?(s.failed?"failed":"delivered"):"assigned",addr:s.addr,city:s.city||"",cust_name:s.name||"",cust_phone:s.phone||"",note:s.note||"",urgent:!!s.urgent,after_t:s.after||"",before_t:s.before||"",lat:s.lat??null,lon:s.lon??null,geo:s.geo||null,...extraCols(s),pod:s.done?podCol(s):null}))).select("id");
+      if(error||!Array.isArray(data)||data.length!==part.length) break;
+      data.forEach((d,k)=>{ part[k].rid=d.id; part[k].mine=true; });
     }
     const { data, error }=await C.sb.from("deliveries").select("*").eq("assigned_to",ME.id).eq("day",C.todayIL()).in("status",["assigned","delivered","failed"]).order("seq",{ascending:true,nullsFirst:false}).order("id");
     if(error) throw error;
@@ -2156,7 +2201,8 @@ async function pull(){
     for(const r of data){ if(!seen.has(r.id)){ kept.push(rowToStop(r,null)); added++; } }
     const removed=state.stops.filter(s=>s.rid&&!data.some(r=>r.id===s.rid)).length;
     // open first, then done – keep the courier's order
-    state.stops=[...kept.filter(s=>!s.done),...kept.filter(s=>s.done)];
+    const hideBefore=state.clearedAt||0; // "ניקוי המסלול": finished stops from before the clear stay off the list
+    state.stops=[...kept.filter(s=>!s.done),...kept.filter(s=>s.done&&!(s.doneAt&&s.doneAt<hideBefore))];
     save(); render();
     if(added){ state.dirty=true; save(); render(); }
     if(added&&!state._quiet){ setStatus("התקבלו "+added+" משלוחים חדשים מהמנהל. לחץ 'בצע אופטימיזציה'."); toast("התקבלו "+added+" משלוחים חדשים מהמנהל","סדר עכשיו",()=>orderGeo(),8000); try{ navigator.vibrate&&navigator.vibrate([200,100,200]); }catch(e){} }

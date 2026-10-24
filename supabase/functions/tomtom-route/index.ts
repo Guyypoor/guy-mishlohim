@@ -26,8 +26,38 @@ Deno.serve(async (req) => {
   const { data: prof } = await sb.from("profiles").select("status").eq("id", u.user.id).maybeSingle();
   if (!prof || prof.status !== "active") return json({ error: "inactive" }, 403);
 
-  let body: { points?: { lat: number; lon: number }[]; best?: boolean; depart?: string };
+  let body: { points?: { lat: number; lon: number }[]; best?: boolean; depart?: string; geocode?: { q: string }[] };
   try { body = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
+  // address lookup for many stops at once (TomTom Geocoding, 4 in parallel, retry on 429)
+  if (Array.isArray(body.geocode)) {
+    const items = body.geocode.slice(0, 100);
+    const out: unknown[] = new Array(items.length).fill(null);
+    let next = 0;
+    const worker = async () => {
+      while (next < items.length) {
+        const k = next++;
+        const q = String(items[k]?.q || "").slice(0, 200);
+        if (!q) continue;
+        const url = "https://api.tomtom.com/search/2/geocode/" + encodeURIComponent(q) + ".json?" +
+          new URLSearchParams({ key, countrySet: "IL", language: "he-IL", limit: "3" }).toString();
+        for (let a = 0; a < 3; a++) {
+          const r = await fetch(url);
+          if (r.status === 429) { await new Promise((s) => setTimeout(s, 400 * (a + 1))); continue; }
+          if (!r.ok) break;
+          const j: any = await r.json();
+          out[k] = (j.results || []).map((x: any) => ({
+            lat: x.position?.lat, lon: x.position?.lon, type: x.type || "",
+            city: x.address?.municipality || "", sub: x.address?.municipalitySubdivision || "",
+            score: x.matchConfidence?.score ?? null,
+          }));
+          break;
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return json({ geo: out });
+  }
+
   const pts = body.points;
   if (!Array.isArray(pts) || pts.length < 2 || pts.length > 150) return json({ error: "bad_points" }, 400);
   for (const p of pts) if (!isFinite(+p.lat) || !isFinite(+p.lon)) return json({ error: "bad_points" }, 400);
