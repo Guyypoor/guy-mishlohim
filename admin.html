@@ -313,7 +313,21 @@ function renderAssignSelects(){
   w.replaceChildren(...couriers().map(c=>{ const on=POS.find(p=>p.courier===c.id&&p.on_shift); const i=el("input",{type:"checkbox",value:c.id}); i.checked=prev.size?prev.has(c.id):!!on; return el("label",{},i," "+(c.full_name||c.phone)); }));
   const rw=$("#rWho"), rc=rw.value; rw.replaceChildren(el("option",{value:"",text:"כולם"}),...PROF.filter(p=>p.role==="courier"||DEL.some(d=>d.assigned_to===p.id)).map(c=>el("option",{value:c.id,text:c.full_name||c.phone}))); rw.value=rc;
 }
-function podHint(d){ const p=d.pod; if(!p||!(p.photo||p.sig)) return null; return el("div",{class:"hint",text:[p.photo?"📷 צולם":"",p.sig?"✍️ נחתם":""].filter(Boolean).join(" · ")+" (בטלפון של השליח)"}); }
+async function openPod(path){
+  const w=window.open("","_blank"); // opened right away so the browser doesn't block it
+  const { data, error }=await sb.storage.from("pod").createSignedUrl(path,3600);
+  if(error||!data){ if(w) w.close(); alert("לא הצלחתי לפתוח את הקובץ: "+C.errText(error||{})); return; }
+  if(w) w.location=data.signedUrl; else location.href=data.signedUrl;
+}
+function podHint(d){
+  const p=d.pod; if(!p||!(p.photo||p.sig)) return null;
+  const box=el("div",{class:"hint",style:"display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px"});
+  if(p.photo_path) box.append(el("button",{class:"btn ghost sm",type:"button",text:"📷 צילום",onclick:()=>openPod(p.photo_path)}));
+  else if(p.photo) box.append(el("span",{text:"📷 צולם (עוד לא עלה)"}));
+  if(p.sig_path) box.append(el("button",{class:"btn ghost sm",type:"button",text:"✍️ חתימה",onclick:()=>openPod(p.sig_path)}));
+  else if(p.sig) box.append(el("span",{text:"✍️ נחתם (עוד לא עלה)"}));
+  return box;
+}
 function renderDel(){
   const f=$("#fStatus").value; const rows=DEL.filter(d=>!f||d.status===f);
   $("#delCount").textContent=DEL.length+" משלוחים ביום הזה · "+DEL.filter(d=>d.status==="new").length+" לא משובצים";

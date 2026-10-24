@@ -930,15 +930,17 @@ async function orderGeo(){
     for(const s of located){ const key=s.lat.toFixed(5)+","+s.lon.toFixed(5)+"|"+(s.urgent?1:0)+"|"+(s.last?1:0)+"|"+(s.after||"")+"|"+(s.before||""); if(!groups.has(key)) groups.set(key,{p:{lat:s.lat,lon:s.lon,urgent:s.urgent,last:!!s.last,after:s.after,before:s.before,svc:0},list:[]}); groups.get(key).list.push(s); groups.get(key).p.svc+=svcOf(s); }
     const G2=[...groups.values()]; G2.forEach(g=>g.list.sort((a,b)=>numOf(a)-numOf(b)));
     const t0=state.driving?nowSec():departSec();
-    const r=await routeOrder(routeStart, G2.map(g=>g.p), state.endLL, t0);
+    let r=await routeOrder(routeStart, G2.map(g=>g.p), state.endLL, t0);
+    if(r.mx.road||ME){ setStatus("בודק תנועה בזמן אמת..."); r=await trafficRefine(r,G2,routeStart,state.endLL,t0); }
     const sorted=[]; let lateN=0;
     r.ord.forEach((gi,pos)=>{ G2[gi].list.forEach((s,j)=>{ s.leg=j===0?r.legs[pos]:0; s.eta=dayMs(r.etas[pos]+j*SVC); s.late=r.lates[pos]; if(s.late) lateN++; sorted.push(s); }); });
     lost.forEach(s=>{ s.eta=null; s.leg=null; });
     state.stops=[...sorted,...lost,...done]; state.line=null; state.lineKey=null; state.dirty=false; arrivedId=null;
-    state.sum={m:r.meters,drive:r.drive,finish:dayMs(r.finish),road:r.mx.road,sec:r.sec}; fitPending=!state.driving; save(); render();
+    state.sum={m:r.meters,drive:r.drive,finish:dayMs(r.finish),road:r.mx.road||!!r.traffic,traffic:!!r.traffic,sec:r.sec}; fitPending=!state.driving; save(); render();
     const approx=open.filter(s=>s.geo==="city").length, exactN=open.filter(s=>s.geo==="house").length;
     let msg;
-    if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
+    if(r.traffic) msg="המסלול המהיר ביותר עם תנועה בזמן אמת: כ־"+Math.round(r.meters/1000)+" ק״מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(r.delay>120?" (מתוכן כ־"+Math.round(r.delay/60)+" דקות בגלל עומסים)":"")+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+".";
+    else if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
     else msg="אין חיבור לשרת הכבישים, לכן סודר לפי קו אווירי: כ־"+Math.round(r.meters/1000)+" ק\"מ משוער.";
     msg+=" "+exactN+" מתוך "+open.length+" אותרו עד רמת הבית"+(gcOffline?" (אין חיבור לשירות המפות – השאר לפי רחוב)":"")+".";
     if(open.some(s=>s.urgent)) msg+=" משלוחים דחופים בהתחלה.";
@@ -1291,7 +1293,78 @@ function isPick(s){ return s&&s.type==="pickup"; }
 function spotText(s){ const p=s&&s.spot; if(!p) return ""; return [p.z,p.sd,p.h].filter(Boolean).join(" · "); }
 function spotFromStr(t){ const p=String(t||"").split("·").map(x=>x.trim()); const o={z:"",sd:"",h:""}; p.forEach(x=>{ if(["קדימה","אמצע","אחורה"].includes(x)) o.z=x; else if(["ימין","שמאל"].includes(x)) o.sd=x; else if(["רצפה","מדף"].includes(x)) o.h=x; }); return (o.z||o.sd||o.h)?o:null; }
 function extraCols(s){ return {pkg:s.pkg||"",pkgs:s.pkgs?+s.pkgs:null,spot:spotText(s),stop_type:isPick(s)?"pickup":"delivery",last_stop:!!s.last,svc_min:(s.svc!=null&&s.svc!=="")?+s.svc:null}; }
-function podCol(s){ const p=s.pod||{}; return {where:p.where||"",recipient:p.recipient||"",note:p.note||"",photo:!!p.photo,sig:!!p.sig}; }
+function podCol(s){ const p=s.pod||{}; return {where:p.where||"",recipient:p.recipient||"",note:p.note||"",photo:!!p.photo,sig:!!p.sig,photo_path:p.photo_path||null,sig_path:p.sig_path||null}; }
+
+/* ---------- live traffic (TomTom, through our server function – the key never reaches the phone) ---------- */
+let trafficOff=0;
+async function traffic(points,best,departMs){
+  if(!ME||!window.Cloud||!Cloud.sb||Date.now()<trafficOff||points.length<2||points.length>150) return null;
+  try{
+    const call=Cloud.sb.functions.invoke("tomtom-route",{body:{points:points.map(p=>({lat:p.lat,lon:p.lon})),best:!!best,depart:departMs&&departMs>Date.now()+60000?new Date(departMs).toISOString():undefined}});
+    const res=await Promise.race([call,new Promise(r=>setTimeout(()=>r({error:{message:"timeout"}}),15000))]);
+    if(res.error||!res.data||!Array.isArray(res.data.legs)){ const m=String(res.error&&res.error.message||""); if(!/timeout/.test(m)) trafficOff=Date.now()+10*60000; return null; }
+    return res.data;
+  }catch(e){ return null; }
+}
+/* our order (respecting urgent / last / time windows) is re-timed with live traffic; when nothing forces an order,
+   TomTom's own traffic-aware ordering is tried too and kept only if it is faster */
+async function trafficRefine(r,groups,start,end,t0){
+  if(!r||!r.ord||!r.ord.length) return r;
+  const nodes=r.ord.map(gi=>groups[gi].p);
+  const seq=[start||nodes[0],...(start?nodes:nodes.slice(1))]; if(end) seq.push(end);
+  const shift=start?0:1;           // without a start point the first stop is the origin
+  const dep=dayMs(t0);
+  const mine=await traffic(seq,false,dep); if(!mine) return r;
+  let ord=r.ord.slice(), legs=mine.legs;
+  const free=nodes.every(p=>!p.urgent&&!p.last&&!p.after&&!p.before);
+  if(free&&seq.length>=4){
+    const alt=await traffic(seq,true,dep);
+    if(alt&&Array.isArray(alt.order)&&alt.order.length===seq.length-2&&alt.total.t+30<mine.total.t){
+      const inner=seq.slice(1,-1).map((_,k)=>k); const by=new Array(inner.length);
+      alt.order.forEach(w=>{ by[w.optimizedIndex]=w.providedIndex; });
+      if(by.every(x=>x!=null)){
+        const innerIdx=by.map(pi=>pi+1);               // positions in seq
+        const newSeqIdx=[0,...innerIdx,seq.length-1];
+        const stopsSeq=newSeqIdx.filter(i=>end?i<seq.length-1:true).filter(i=>start?i>0:true).map(i=>i-1+shift);
+        if(stopsSeq.length===ord.length){ ord=stopsSeq.map(k=>r.ord[k]); legs=alt.legs; }
+      }
+    }
+  }
+  // timings from the traffic legs
+  const W=g=>({a:secOfDay(g.p.after),b:secOfDay(g.p.before)});
+  let t=t0, meters=0, drive=0, wait=0; const L=[], E=[], La=[];
+  const legAt=k=>legs[k-shift]||{t:0,d:0};
+  ord.forEach((gi,k)=>{ const lg=(k===0&&!start)?{t:0,d:0}:legAt(k); t+=lg.t; drive+=lg.t; meters+=lg.d; const w=W(groups[gi]); if(w.a!=null&&t<w.a){ wait+=w.a-t; t=w.a; } L.push(lg.t); E.push(t); La.push(w.b!=null&&t>w.b); t+=groups[gi].p.svc??SVC; });
+  if(end){ const lg=legs[legs.length-1]; t+=lg.t; drive+=lg.t; meters+=lg.d; }
+  return Object.assign({},r,{ord,legs:L,etas:E,lates:La,meters,drive,wait,finish:t,sec:t-t0,traffic:true,delay:(legs.reduce((a,l)=>a+(l.delay||0),0))});
+}
+
+/* ---------- delivery photos & signatures → private server storage ---------- */
+const PODQ="courier-pod-q";
+function podQ(){ try{ return JSON.parse(localStorage.getItem(PODQ)||"[]"); }catch(e){ return []; } }
+function podQset(q){ try{ localStorage.setItem(PODQ,JSON.stringify(q)); }catch(e){} }
+function queuePod(s,kind){ if(!window.Cloud||!Cloud.on) return; const q=podQ(); q.push({id:s.id,kind,t:Date.now()}); podQset(q); flushPod(); }
+let podBusy=false;
+async function flushPod(){
+  if(!ME||podBusy||!navigator.onLine) return; podBusy=true;
+  try{
+    for(let guard=0;guard<50;guard++){
+      const q=podQ(); if(!q.length) break; const x=q[0];
+      const drop=()=>{ const q2=podQ(); q2.shift(); podQset(q2); };
+      const s=state.stops.find(z=>z.id===x.id);
+      if(!s||!s.done){ drop(); continue; }
+      if(!s.rid) break;                                   // wait until the stop exists on the server
+      const data=await IDB.get((x.kind==="sig"?"s:":"p:")+s.id); if(!data){ drop(); continue; }
+      const file=dataUrlToFile(data,x.kind==="sig"?"sig.png":"photo.jpg");
+      const path=ME.id+"/"+s.rid+"_"+x.kind+"_"+x.t+(x.kind==="sig"?".png":".jpg");
+      const { error }=await Cloud.sb.storage.from("pod").upload(path,file,{contentType:file.type,upsert:true});
+      if(error){ if(/fetch|network|timeout/i.test(error.message||"")) break; drop(); continue; }
+      s.pod=s.pod||{}; s.pod[x.kind==="sig"?"sig_path":"photo_path"]=path; save();
+      cloudPatch(s,{pod:podCol(s)}); drop();
+    }
+  }catch(e){} finally{ podBusy=false; }
+}
+addEventListener("online",()=>flushPod());
 function winText(s){ return s.after&&s.before?("בין "+s.after+"–"+s.before):(s.after?"לא לפני "+s.after:(s.before?"עד "+s.before:"")); }
 
 /* ---------- toast ---------- */
@@ -1371,9 +1444,16 @@ async function retime(quiet){
   if(!open.length){ save(); render(); return; }
   const start=(state.driving&&MY)?MY:state.startLL;
   const nodes=[start||open[0],...open]; const endI=state.endLL?nodes.length:-1; if(state.endLL) nodes.push(state.endLL);
+  let t=state.driving?nowSec():departSec(), prev=0, meters=0, drive=0; const t0=t;
+  const tt=await traffic(start?nodes:nodes.slice(1),false,dayMs(t0));
+  if(tt){ // live-traffic legs, in the same order
+    const off=start?0:1; open.forEach((s,k)=>{ const lg=(k===0&&!start)?{t:0,d:0}:(tt.legs[k-off]||{t:0,d:0}); meters+=lg.d; drive+=lg.t; s.leg=lg.t; t+=lg.t; const a=secOfDay(s.after); if(a!=null&&t<a) t=a; s.eta=dayMs(t); const b=secOfDay(s.before); s.late=b!=null&&t>b; t+=svcOf(s); });
+    if(state.endLL){ const lg=tt.legs[tt.legs.length-1]; meters+=lg.d; drive+=lg.t; t+=lg.t; }
+    state.sum={m:meters,drive,finish:dayMs(t),road:true,traffic:true,sec:t-t0}; state.dirty=false; state.line=null;
+    save(); render(); drawMap(true); cloudPushOrder(); if(!quiet) setStatus("הזמנים חושבו מחדש לפי הסדר שבחרת, עם תנועה בזמן אמת."); return;
+  }
   const mx=(await roadMatrix(nodes))||airMatrix(nodes);
   if(!start){ for(let j=0;j<nodes.length;j++){ mx.T[0][j]=0; mx.Dm[0][j]=0; } }
-  let t=state.driving?nowSec():departSec(), prev=0, meters=0, drive=0; const t0=t;
   open.forEach((s,k)=>{ const i=k+1; const d=mx.T[prev][i]; meters+=mx.Dm[prev][i]; drive+=d; s.leg=d; t+=d; const a=secOfDay(s.after); if(a!=null&&t<a) t=a; s.eta=dayMs(t); const b=secOfDay(s.before); s.late=b!=null&&t>b; t+=svcOf(s); prev=i; });
   if(endI>=0){ meters+=mx.Dm[prev][endI]; drive+=mx.T[prev][endI]; t+=mx.T[prev][endI]; }
   state.sum={m:meters,drive,finish:dayMs(t),road:mx.road,sec:t-t0}; state.dirty=false; state.line=null;
@@ -1418,7 +1498,7 @@ function markDelivered(s,pod){
   const r=podText(s);
   track(s,isPick(s)?"נאסף":"נמסר",r); recomputeEta();
   cloudPatch(s,{status:"delivered",reason:r,done_at:new Date().toISOString(),pod:podCol(s)});
-  if(pod&&pod.photoData) IDB.put("p:"+s.id,pod.photoData); if(pod&&pod.sigData) IDB.put("s:"+s.id,pod.sigData);
+  if(pod&&pod.photoData) IDB.put("p:"+s.id,pod.photoData).then(()=>queuePod(s,"photo")); if(pod&&pod.sigData) IDB.put("s:"+s.id,pod.sigData).then(()=>queuePod(s,"sig"));
   if(s.pod){ delete s.pod.photoData; delete s.pod.sigData; }
   afterMark(s,(isPick(s)?"נאסף: ":"נמסר: ")+s.addr);
 }
@@ -1427,7 +1507,7 @@ function markFailed(s,reason,photo){
   s.done=true; s.failed=true; s.reason=reason||""; s.doneAt=Date.now(); s.pod={photo:!!photo};
   track(s,"לא נמסר",s.reason); recomputeEta();
   cloudPatch(s,{status:"failed",reason:s.reason,done_at:new Date().toISOString(),pod:podCol(s)});
-  if(photo) IDB.put("p:"+s.id,photo);
+  if(photo) IDB.put("p:"+s.id,photo).then(()=>queuePod(s,"photo"));
   afterMark(s,"לא נמסר: "+s.addr);
 }
 function unmark(s){
@@ -1600,7 +1680,7 @@ function renderPlanHead(){
   const open=openStops(), total=state.stops.length, done=total-open.length;
   $("#sumStops").textContent=total?(open.length?open.length+(open.length===1?" עצירה":" עצירות"):"המסלול הושלם"):"אין עצירות";
   let meta="";
-  if(open.length&&state.sum&&!state.dirty) meta=fmtKm(state.sum.m)+" · "+fmtDur(state.sum.drive)+" נסיעה · סיום ~"+clock(state.sum.finish);
+  if(open.length&&state.sum&&!state.dirty) meta=fmtKm(state.sum.m)+" · "+fmtDur(state.sum.drive)+" נסיעה"+(state.sum.traffic?" (עם תנועה)":"")+" · סיום ~"+clock(state.sum.finish);
   else if(open.length>1&&state.dirty) meta="עוד לא מסודר";
   if(done) meta=(meta?meta+" · ":"")+done+" טופלו";
   $("#sumMeta").textContent=meta;
@@ -2081,7 +2161,7 @@ async function pull(){
     if(added){ state.dirty=true; save(); render(); }
     if(added&&!state._quiet){ setStatus("התקבלו "+added+" משלוחים חדשים מהמנהל. לחץ 'בצע אופטימיזציה'."); toast("התקבלו "+added+" משלוחים חדשים מהמנהל","סדר עכשיו",()=>orderGeo(),8000); try{ navigator.vibrate&&navigator.vibrate([200,100,200]); }catch(e){} }
     else if(removed){ setStatus(removed+" משלוחים הוסרו מהמסלול שלך על ידי המנהל."); }
-    state._quiet=false;
+    state._quiet=false; flushPod();
   }catch(e){ /* offline – keep local */ }
   finally{ pulling=false; }
 }
