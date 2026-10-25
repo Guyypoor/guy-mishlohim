@@ -154,13 +154,17 @@ td select{padding:5px 8px;font-size:.9rem;min-width:120px}
     <div class="panel">
       <h2>משלוחי היום</h2>
       <div class="actions">
-        <select id="fStatus" style="width:auto"><option value="">כל הסטטוסים</option><option value="new">לא משובץ</option><option value="assigned">משובץ</option><option value="delivered">נמסר</option><option value="failed">לא נמסר</option><option value="cancelled">בוטל</option></select>
+        <select id="fStatus" style="width:auto"><option value="">כל הפעילים</option><option value="all">הכול (כולל מבוטלים)</option><option value="new">לא משובץ</option><option value="assigned">משובץ</option><option value="delivered">נמסר</option><option value="failed">לא נמסר</option><option value="cancelled">בוטל</option></select>
         <span class="hint" id="delCount"></span>
       </div>
       <div class="panel" style="background:var(--bg)">
         <b>חלוקה אוטומטית</b> של המשלוחים הלא-משובצים בין השליחים המסומנים (לפי אזורים מנקודת היציאה):
         <div class="chkline" id="splitWho" style="margin-top:8px"></div>
         <div class="actions"><button class="btn amber" id="splitBtn" type="button">חלק אוטומטית</button><span class="status" id="splitStatus"></span></div>
+      </div>
+      <div class="panel" style="background:var(--bg)">
+        <b>ניקוי מסלולים</b> של היום הנבחר – המשלוחים הפתוחים מוסרים מהמסלול (ומהאפליקציה של השליח). משלוחים שכבר נמסרו / לא נמסרו נשארים לדוחות.
+        <div class="actions" style="margin-top:8px"><select id="clrWho" style="width:auto" aria-label="של מי לנקות"></select><button class="btn danger" id="clrBtn" type="button">נקה מסלול</button><span class="status" id="clrStatus"></span></div>
       </div>
       <div class="tblwrap"><table><thead><tr><th>#</th><th>כתובת</th><th>לקוח</th><th>שליח</th><th>סטטוס</th><th>הגעה/מסירה</th><th></th></tr></thead><tbody id="dRows"></tbody></table></div>
     </div>
@@ -329,7 +333,8 @@ function podHint(d){
   return box;
 }
 function renderDel(){
-  const f=$("#fStatus").value; const rows=DEL.filter(d=>!f||d.status===f);
+  const f=$("#fStatus").value; const rows=DEL.filter(d=>f==="all"||(f?d.status===f:d.status!=="cancelled"));
+  renderClrWho();
   $("#delCount").textContent=DEL.length+" משלוחים ביום הזה · "+DEL.filter(d=>d.status==="new").length+" לא משובצים";
   const tb=$("#dRows"); tb.innerHTML="";
   rows.forEach((d,i)=>{
@@ -353,6 +358,27 @@ async function assign(d,cid){
   const patch=cid?{assigned_to:cid,status:"assigned",seq:null}:{assigned_to:null,status:"new",seq:null};
   const { error }=await sb.from("deliveries").update(patch).eq("id",d.id); if(error) alert(C.errText(error)); else loadDeliveries();
 }
+const isOpen=d=>d.status==="new"||d.status==="assigned";
+function renderClrWho(){
+  const sel=$("#clrWho"), prev=sel.value; sel.innerHTML="";
+  const open=DEL.filter(isOpen), n=f=>open.filter(f).length;
+  sel.append(el("option",{value:"*",text:"כל המסלולים ("+open.length+" פתוחים)"}));
+  if(n(d=>!d.assigned_to)) sel.append(el("option",{value:"-",text:"לא משובצים ("+n(d=>!d.assigned_to)+")"}));
+  couriers().forEach(c=>{ const k=n(d=>d.assigned_to===c.id); if(k) sel.append(el("option",{value:c.id,text:(c.full_name||c.phone)+" ("+k+")"})); });
+  if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+}
+$("#clrBtn").onclick=async()=>{
+  const w=$("#clrWho").value, st=t=>$("#clrStatus").textContent=t;
+  const todo=DEL.filter(d=>isOpen(d)&&(w==="*"||(w==="-"?!d.assigned_to:d.assigned_to===w)));
+  if(!todo.length) return st("אין משלוחים פתוחים לניקוי ביום הזה.");
+  const who=w==="*"?"כל המסלולים":(w==="-"?"המשלוחים הלא משובצים":"המסלול של "+nameOf(w));
+  if(!confirm("לנקות את "+who+" ביום "+($("#dDay").value||C.todayIL())+"?\n"+todo.length+" משלוחים פתוחים יוסרו (יסומנו 'בוטל' – אפשר לשחזר כל אחד מהרשימה עם 'הכול (כולל מבוטלים)').")) return;
+  const b=$("#clrBtn"); b.disabled=true; st("מנקה...");
+  const { error }=await sb.from("deliveries").update({status:"cancelled",seq:null}).in("id",todo.map(d=>d.id));
+  b.disabled=false;
+  st(error?C.errText(error):"נוקו "+todo.length+" משלוחים ("+who+"). אצל השליחים הם יורדו מהמסלול תוך כמה שניות.");
+  loadDeliveries();
+};
 async function cancelDel(d){ if(!confirm("לבטל את המשלוח ל"+d.addr+"?")) return; await sb.from("deliveries").update({status:"cancelled"}).eq("id",d.id); loadDeliveries(); }
 $("#fStatus").onchange=renderDel;
 $("#dDay").onchange=loadDeliveries;
