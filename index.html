@@ -1173,6 +1173,126 @@ function showImgItems(items,src){
   items.forEach(x=>p.append(el("div",{},x.addr+(x.city?", "+x.city:""),(x.name||x.phone||x.note)?el("small",{text:" · "+[x.name,x.phone,x.note].filter(Boolean).join(" · ")}):null)));
   $("#imgAddRow").hidden=false;
 }
+/* OCR-PARSE START – turns the phone OCR result into stops. A photographed table (Excel, H.D list) is read by its
+   columns: only the "כתובת" column becomes the address and "שם לקוח" the name; toolbar/grid noise is dropped. */
+const OCR_COLS=[["pkg",/שליחו|משלוח|הזמנ|ברקוד|order/i],["skip",/מוצר|תיאור|פריט|product/i],["addr",/כתוב|רחוב|address|street/i],
+  ["city",/עיר|ישוב|יישוב|city|town/i],["phone",/טלפון|נייד|phone|mobile/i],["note",/הער|note/i],["name",/שם|לקוח|נמען|name|customer/i]];
+function ocrLines(d){
+  if(d&&d.lines&&d.lines.length) return d.lines;
+  const out=[]; ((d&&d.blocks)||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>out.push(l)))); return out;
+}
+const isNoise=t=>!/[0-9א-תA-Za-z]/.test(t);
+function ocrTable(d){
+  const lines=ocrLines(d).filter(l=>l&&l.words&&l.words.length&&l.bbox);
+  if(lines.length<3) return null;
+  const hs=lines.map(l=>l.bbox.y1-l.bbox.y0).sort((a,b)=>a-b), H=Math.max(8,hs[hs.length>>1]);
+  // header row: a line with an address heading and at least one more known heading
+  let hi=-1, cols=null;
+  for(let i=0;i<lines.length&&hi<0;i++){
+    const ws=lines[i].words.filter(w=>!isNoise(w.text)).slice().sort((a,b)=>b.bbox.x1-a.bbox.x1);
+    if(!ws.some(w=>/כתוב|address/i.test(w.text))) continue;
+    const groups=[]; for(const w of ws){ const g=groups[groups.length-1];
+      if(g&&g.x0-w.bbox.x1<H*0.9){ g.x0=Math.min(g.x0,w.bbox.x0); g.t+=" "+w.text; } else groups.push({x0:w.bbox.x0,x1:w.bbox.x1,t:w.text}); }
+    const cs=groups.map(g=>{ const c=OCR_COLS.find(([,rx])=>rx.test(g.t)); return c?{key:c[0],x0:g.x0,x1:g.x1}:null; }).filter(Boolean);
+    const ad=cs.find(c=>c.key==="addr");
+    if(ad&&cs.length>=2){ hi=i; cols=cs; }
+    else if(ad&&!/\d/.test(ws.map(w=>w.text).join(""))&&ws.length<=6){ hi=i; cols=[ad,{key:"rest",x0:ad.x1+H*3,x1:1e9}]; }  // other headings misread: keep just the address column
+  }
+  if(hi<0) return null;
+  cols.sort((a,b)=>b.x1-a.x1);
+  for(let i=0;i<cols.length;i++) cols[i].lo=i+1<cols.length?(cols[i].x0+cols[i+1].x1)/2:-1e9;  // a word belongs to the first column (from the right) whose lo is left of its right edge
+  // group the lines under the header into table rows
+  const rows=[];
+  for(const l of lines.slice(hi+1).sort((a,b)=>a.bbox.y0-b.bbox.y0)){
+    const cy=(l.bbox.y0+l.bbox.y1)/2, r=rows[rows.length-1];
+    if(r&&Math.abs(cy-r.cy)<H*0.5) r.words.push(...l.words); else rows.push({cy,words:[...l.words]});
+  }
+  const out=[];
+  for(const r of rows){
+    const cell={};
+    for(const w of r.words.slice().sort((a,b)=>b.bbox.x1-a.bbox.x1)){
+      const t=String(w.text||"").replace(/[|[\]{}\u200e\u200f\u202a-\u202e]/g,"").trim(); if(!t||isNoise(t)) continue;
+      const c=cols.find(c=>w.bbox.x1>c.lo); if(c) (cell[c.key]=cell[c.key]||[]).push(t);
+    }
+    let a=cell.addr||[];
+    const ci=a.findIndex(t=>/,$/.test(t));                    // after "street 12," only Hebrew words (the city) remain
+    if(ci>=0) a=a.slice(0,ci+1).concat(a.slice(ci+1).filter(t=>/[א-ת]{2}/.test(t)));
+    while(a.length>1&&/^[א-ת]$/.test(a[a.length-1])) a.pop();     // stray single letters at the edge of the photo
+    while(a.length&&!/[א-ת]/.test(a[a.length-1])&&!(ci<0&&/^\d{1,4}[א-ת]?,?$/.test(a[a.length-1])&&a.length>1)) a.pop();
+    let s=a.join(" ").replace(/\s+,/g,",").replace(/,+$/,"").trim();
+    if(!/[א-ת]{2}/.test(s)) continue;
+    let city=(cell.city||[]).filter(t=>/[א-ת]{2}/.test(t)).join(" ");
+    const k=s.lastIndexOf(",");
+    if(!city&&k>0&&/[א-ת]{2}/.test(s.slice(0,k))){ city=s.slice(k+1).trim(); s=s.slice(0,k).trim(); }
+    const name=(cell.name||[]).filter(t=>/[א-תA-Za-z]{2}/.test(t)).join(" ");
+    const pm=(cell.phone||[]).join(" ").match(PHONE_RE);
+    out.push({addr:s,city,name,phone:pm?pm[0].replace(/\s/g,""):"",note:(cell.note||[]).join(" ")});
+  }
+  return out.length?out:null;
+}
+/* free-text OCR (WhatsApp screenshot, note): drop lines that are mostly OCR noise */
+function ocrPlausible(x){
+  const toks=x.addr.split(/\s+/).filter(Boolean);
+  if(toks.length>6||/\d{5,}/.test(x.addr)||!/[א-ת]{2,}["'׳]?[א-ת]*\s+[1-9]\d{0,3}[א-ת]?(?=[\s,]|$)/.test(x.addr)) return false;
+  const heb=toks.filter(t=>/[א-ת]{2}/.test(t)).length, num=toks.filter(t=>/^\d{1,4}[א-ת]?,?$/.test(t)).length;
+  return toks.length-heb-num<=Math.max(0,heb-1) && num<=2;
+}
+function lev(a,b,max){
+  if(Math.abs(a.length-b.length)>max) return max+1;
+  let p=Array.from({length:b.length+1},(_,j)=>j);
+  for(let i=1;i<=a.length;i++){ const c=[i]; let m=i;
+    for(let j=1;j<=b.length;j++){ c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1)); if(c[j]<m) m=c[j]; }
+    if(m>max) return max+1; p=c; }
+  return p[b.length];
+}
+function nearest(word,keys,max){
+  let best=null,bd=max+1,tie=false;
+  for(const k of keys){ const d=lev(word,k,max); if(d<bd){bd=d;best=k;tie=false;} else if(d===bd) tie=true; }
+  return bd<=max&&!tie?best:null;
+}
+/* fix OCR misspellings against the local map lists (streets and towns of the area) */
+async function ocrFix(items){
+  const G=await loadGeo().catch(()=>null); if(!G) return items.map(x=>Object.assign(x,{known:false}));
+  const towns=[...new Set(G.locs.map(l=>l.n))], tname=new Map(G.locs.map(l=>[l.n,l.name])), streets=[...G.st.keys()];
+  const fixOne=n=>{
+    if(tname.has(n)) return tname.get(n);
+    const suf=towns.filter(t=>t.endsWith(" "+n)).sort((a,b)=>a.length-b.length);
+    if(suf.length&&(suf.length===1||suf[0].length<suf[1].length)) return tname.get(suf[0]);
+    const f=n.length>=4?nearest(n,towns,n.length>=7?2:1):null; return f?tname.get(f):null; };
+  const fixTown=c=>{ const w=gnorm(c).split(" ").filter(Boolean);
+    for(let L=w.length;L>=1;L--) for(let i=0;i+L<=w.length;i++){ const sp=w.slice(i,i+L).join(" "); if(sp.length<3) continue; const r=fixOne(sp); if(r) return r; }  // "בת עדה כו" -> "עדה" -> "גבעת עדה"
+    return c; };
+  const findStreet=w=>{ const n=gnorm(w); if(!/[א-ת]{2}/.test(n)) return null; if(G.st.has(n)) return G.disp.get(n);
+    const f=n.length>=5?nearest(n,streets,n.length>=7?2:1):null; return f?G.disp.get(f):null; };
+  // a long noisy line ("2160994 ישראכרט ישראל מוטאי הנח'ל 8, פרדס חנה"): find "<known street> <number>[, town]" inside it
+  const pick=s=>{ const t=s.replace(/,/g,", ").split(/\s+/).filter(Boolean);
+    for(let i=t.length-1;i>0;i--){ if(!/^\d{1,4}[א-ת]?,?$/.test(t[i])) continue;
+      for(let k=Math.min(3,i);k>=1;k--){ const st=findStreet(t.slice(i-k,i).join(" ")); if(!st) continue;
+        const rest=t.slice(i+1).filter(x=>/[א-ת]{2}/.test(x)).join(" "), town=rest?fixTown(rest):"";
+        return {addr:st+" "+t[i].replace(/,$/,""), city:town!==rest||rest.split(" ").length<=3?town:""}; } }
+    return null; };
+  return items.map(x=>{
+    let known=false;
+    const st0=gnorm((x.addr.match(/^(.*?[א-ת].*?)\s+\d/)||[,""])[1]);
+    if(x.addr.split(/\s+/).length>=4||(st0&&!G.st.has(st0))){ const p=pick(x.addr+(x.city?", "+x.city:"")); if(p) return Object.assign(x,p,{known:true,city:p.city||x.city,phone:/^05\d{8}$/.test(x.phone)?x.phone:""}); }
+    if(x.city) x.city=fixTown(x.city);
+    const m=x.addr.match(/^(.*?[א-ת].*?)\s+(\d{1,4}[א-ת]?)(.*)$/)||[null,x.addr,"",""];
+    const st=gnorm(m[1]);
+    if(G.st.has(st)){ known=true; if(gnorm(m[1])!==m[1].trim()||G.disp.get(st)!==m[1].trim()) x.addr=(G.disp.get(st)+(m[2]?" "+m[2]:"")+m[3]).trim(); }
+    else if(st.length>=3){ const f=nearest(st,streets,st.length>=6?2:1); if(f){ known=true; x.addr=(G.disp.get(f)+" "+m[2]+m[3]).trim(); } }
+    if(!x.city&&m[3]){ const c=m[3].replace(/^[\s,]+/,""); if(/[א-ת]{2}/.test(c)){ x.city=fixTown(c); x.addr=x.addr.slice(0,x.addr.length-m[3].length).trim(); } }
+    return Object.assign(x,{known});
+  });
+}
+async function ocrItems(data){
+  const tab=ocrTable(data);
+  let items=await ocrFix(tab||parseWhatsApp(String((data&&data.text)||"")));
+  const n=items.length;
+  if(!tab) items=items.filter(x=>x.known||ocrPlausible(x));
+  items=items.map(({known,...x})=>x); items.skipped=n-items.length; items.table=!!tab;
+  return items;
+}
+/* OCR-PARSE END */
 let ocrWorker=null;
 async function getOcr(onProg){
   if(ocrWorker) return ocrWorker;
@@ -1184,16 +1304,32 @@ async function getOcr(onProg){
     gzip:false, workerBlobURL:true,
     logger:m=>{ if(m&&typeof m.progress==="number") onProg(m.status,m.progress); }
   });
+  await ocrWorker.setParameters({tessedit_pageseg_mode:"4"});   // rows of a list/table; the default single-block mode scrambles photographed tables
   return ocrWorker;
 }
-/* camera photos: shrink, grayscale and stretch contrast so the OCR reads paper documents better */
+/* camera photos: shrink smoothly, grayscale, stretch contrast and straighten a tilted photo so the OCR reads rows correctly */
+function skewAngle(d,w,h){
+  const k=Math.min(1,800/Math.max(w,h)), sw=Math.max(1,Math.round(w*k)), sh=Math.max(1,Math.round(h*k)), xs=[], ys=[];
+  for(let y=0;y<sh;y++){ const yy=Math.min(h-1,Math.floor(y/k)); for(let x=0;x<sw;x++){ if(d[(yy*w+Math.min(w-1,Math.floor(x/k)))*4]<128){ xs.push(x); ys.push(y); } } }
+  if(xs.length<300||xs.length>sw*sh*0.5) return 0;
+  const D=sw+sh, hist=new Float64Array(2*D+2); let best=0, bv=-1;
+  for(let a=-8;a<=8.001;a+=0.25){
+    const r=a*Math.PI/180, c=Math.cos(r), s=Math.sin(r); hist.fill(0);
+    for(let i=0;i<xs.length;i++) hist[(ys[i]*c-xs[i]*s+D)|0]++;
+    let v=0; for(let j=0;j<hist.length;j++) v+=hist[j]*hist[j];
+    if(v>bv*1.0005){ bv=v; best=a; }
+  }
+  return best;
+}
 async function prepImg(file){
   try{
     const bmp=await createImageBitmap(file,{imageOrientation:"from-image"});
-    const k=Math.min(1,2200/Math.max(bmp.width,bmp.height));
-    const w=Math.round(bmp.width*k), h=Math.round(bmp.height*k);
+    let src=bmp, sw=bmp.width, sh=bmp.height;
+    const k=Math.min(1,2200/Math.max(sw,sh)), w=Math.round(sw*k), h=Math.round(sh*k);
+    while(sw/2>w){ const t=document.createElement("canvas"); t.width=Math.round(sw/2); t.height=Math.round(sh/2);   // halve step by step: a one-shot shrink of a screen photo turns into moire
+      const tx=t.getContext("2d"); tx.imageSmoothingQuality="high"; tx.drawImage(src,0,0,t.width,t.height); src=t; sw=t.width; sh=t.height; }
     const c=document.createElement("canvas"); c.width=w; c.height=h;
-    const x=c.getContext("2d",{willReadFrequently:true}); x.drawImage(bmp,0,0,w,h); bmp.close&&bmp.close();
+    const x=c.getContext("2d",{willReadFrequently:true}); x.imageSmoothingQuality="high"; x.drawImage(src,0,0,w,h); bmp.close&&bmp.close();
     const im=x.getImageData(0,0,w,h), d=im.data, hist=new Uint32Array(256);
     for(let i=0;i<d.length;i+=4){ const g=(d[i]*299+d[i+1]*587+d[i+2]*114)/1000|0; d[i]=g; hist[g]++; }
     const n=w*h; let lo=0,hi=255,acc=0;
@@ -1202,7 +1338,13 @@ async function prepImg(file){
     if(hi-lo<32){ lo=0; hi=255; }
     const span=Math.max(1,hi-lo);
     for(let i=0;i<d.length;i+=4){ const v=Math.max(0,Math.min(255,(d[i]-lo)*255/span)); d[i]=d[i+1]=d[i+2]=v; }
-    x.putImageData(im,0,0); return c;
+    x.putImageData(im,0,0);
+    const ang=skewAngle(d,w,h);
+    if(Math.abs(ang)<0.5) return c;
+    const r=ang*Math.PI/180, W=Math.ceil(w*Math.abs(Math.cos(r))+h*Math.abs(Math.sin(r))), Hh=Math.ceil(w*Math.abs(Math.sin(r))+h*Math.abs(Math.cos(r)));
+    const o=document.createElement("canvas"); o.width=W; o.height=Hh; const ox=o.getContext("2d");
+    ox.fillStyle="#fff"; ox.fillRect(0,0,W,Hh); ox.imageSmoothingQuality="high"; ox.translate(W/2,Hh/2); ox.rotate(-r); ox.drawImage(c,-w/2,-h/2);
+    return o;
   }catch(e){ return file; }
 }
 async function imgParse(){
@@ -1213,9 +1355,12 @@ async function imgParse(){
   try{
     p.textContent="מכין קורא טקסט…";
     const w=await getOcr(prog);
-    let text="";
-    for(cur=0;cur<imgFiles.length;cur++){ const r=await w.recognize(await prepImg(imgFiles[cur])); text+="\n"+(r&&r.data&&r.data.text||""); }
-    showImgItems(parseWhatsApp(text)," מהתמונה");
+    let all=[], skipped=0, table=false;
+    for(cur=0;cur<imgFiles.length;cur++){
+      const r=await w.recognize(await prepImg(imgFiles[cur]),{},{text:true,blocks:true});
+      const it=await ocrItems(r&&r.data||{}); all=all.concat(it); skipped+=it.skipped||0; table=table||it.table;
+    }
+    showImgItems(all," מהתמונה"+(table?" (לפי עמודת הכתובת בטבלה)":"")+(skipped?" – "+skipped+" שורות שלא נראו ככתובת דולגו":""));
   }catch(e){
     ocrWorker=null; addMsg("הקריאה מהתמונה נכשלה – בדוק שיש אינטרנט ונסה שוב.");
     p.textContent="הקריאה בטלפון נכשלה."+(imgOk?" נסה 'קריאה מדויקת עם Claude'.":" אפשר להעתיק את הטקסט מוואטסאפ ולהדביק בלשונית 'מוואטסאפ'.");
