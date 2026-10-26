@@ -1076,6 +1076,16 @@ async function orderGeo(){
     if(lost.length){ NOMI_LEFT=Math.max(0,NOMI_LEFT)+Math.min(30,lost.length*3); let j=0;
       for(const s of lost.slice()){ j++; setStatus("בודק שוב כתובות שלא נמצאו ("+j+"/"+lost.length+")..."); const g=await locate(G,s,startPt,true); if(g&&g.q!=="city"){ lost.splice(lost.indexOf(s),1); located.push(s); } } }   // only the town is known → a point in the middle of town would spoil the route: keep it out, at the end
     setStatus("מחשב את המסלול הקצר ביותר לפי כבישים...");
+    // a stop found only by its street sits on "the street" (often its middle). If other stops on that street were found
+    // to the house, place it between them by house number (same side first) – so the route doesn't zigzag.
+    { const by=new Map();
+      const sk=s=>{ const a=splitAddr(s.gq||full(s),state.defCity); const m=a.street.match(/^(.*?[א-ת].*?)\s*(\d+)\s*[א-ת]?$/); return m?{k:gnorm(m[1])+"|"+gnorm(a.city),n:+m[2]}:null; };
+      for(const s of located){ s.est=0; const k=sk(s); if(!k) continue; if(!by.has(k.k)) by.set(k.k,{h:[],st:[]}); const g=by.get(k.k); (s.geo==="house"?g.h:(s.geo==="street"?g.st:[])).push({s,n:k.n}); }
+      for(const {h,st} of by.values()){ if(!h.length||!st.length) continue; h.sort((a,b)=>a.n-b.n);
+        for(const x of st){ const same=h.filter(y=>y.n%2===x.n%2), H=same.length?same:h; let lo=null,hi=null;
+          for(const y of H){ if(y.n<=x.n) lo=y; if(y.n>=x.n&&!hi) hi=y; }
+          let p; if(lo&&hi&&hi.n!==lo.n){ const t=(x.n-lo.n)/(hi.n-lo.n); p={lat:lo.s.lat+t*(hi.s.lat-lo.s.lat),lon:lo.s.lon+t*(hi.s.lon-lo.s.lon)}; } else { const y=lo||hi; p={lat:y.s.lat,lon:y.s.lon}; }
+          x.s.lat=p.lat; x.s.lon=p.lon; x.s.est=1; } } }
     // same point (same street) → one stop group, by house number
     const groups=new Map();
     for(const s of located){ const key=s.lat.toFixed(5)+","+s.lon.toFixed(5)+"|"+(s.urgent?1:0)+"|"+(s.last?1:0)+"|"+(s.after||"")+"|"+(s.before||""); if(!groups.has(key)) groups.set(key,{p:{lat:s.lat,lon:s.lon,urgent:s.urgent,last:!!s.last,after:s.after,before:s.before,svc:0},list:[]}); groups.get(key).list.push(s); groups.get(key).p.svc+=svcOf(s); }
@@ -1994,7 +2004,7 @@ function stopRow(s,opts){
     const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
     if(spotText(s)) chips.append(el("span",{class:"chip"},icon("box"),el("span",{text:spotText(s)})));
     if(s.gq&&s.geo&&s.geo!=="none"){ const fx=s.gq.split(",")[0].trim(); if(gnorm(fx)!==gnorm(String(s.addr||"").split(",")[0])) chips.append(el("span",{class:"chip",title:"כך האפליקציה הבינה את הכתובת",text:"✎ "+fx})); }
-    if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה – הנקודה על הרחוב",text:"📍 הרחוב נמצא, בלי מספר בית"}));
+    if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה",text:s.est?"📍 לפי הבתים השכנים ברחוב":"📍 הרחוב נמצא, בלי מספר בית"}));
     if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"⚠ הרחוב לא זוהה – לחץ לתיקון"}));
     if(s.geo==="none") chips.append(el("span",{class:"chip warn",text:"⚠ לא נמצא במפה"}));
   } else if(s.failed) chips.append(el("span",{class:"chip fail",text:"לא נמסר"+(s.reason?": "+s.reason:"")}));
