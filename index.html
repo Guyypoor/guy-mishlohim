@@ -1071,7 +1071,7 @@ async function orderGeo(){
       if(todo.length>3){ setStatus("מאתר "+todo.length+" כתובות במפה..."); await serverGeocode(G,todo,(d,t)=>setStatus("מאתר כתובות במפה ("+d+"/"+t+")...")); } }
     NOMI_LEFT=25; NOMI_SKIPPED=0;
     const located=[], lost=[]; let k=0;
-    for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g) located.push(s); else lost.push(s); }
+    for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g&&g.q!=="city") located.push(s); else lost.push(s); }   // only the town is known → a point in the middle of town would spoil the route: keep it out, at the end
     setStatus("מחשב את המסלול הקצר ביותר לפי כבישים...");
     // same point (same street) → one stop group, by house number
     const groups=new Map();
@@ -1091,12 +1091,11 @@ async function orderGeo(){
     else if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
     else msg="אין חיבור לשרת הכבישים, לכן סודר לפי קו אווירי: כ־"+Math.round(r.meters/1000)+" ק\"מ משוער.";
     { const streetN=open.filter(s=>s.geo==="street").length;
-      msg+=" כל "+located.length+" הכתובות במסלול: "+exactN+" לפי מספר בית"+(streetN?", "+streetN+" לפי הרחוב (מספר הבית לא קיים במפה – הן ברחוב הנכון ומסודרות לפי מספר הבית)":"")+(gcOffline&&exactN<open.length?" (אין חיבור לשירות המפות)":"")+"."; }
+      msg+=" "+located.length+" כתובות סודרו: "+exactN+" עד הבית"+(streetN?", "+streetN+" ברחוב הנכון בלי מספר בית (המספר לא קיים במפה – מסודרות לפי מספר הבית ברחוב)":"")+(gcOffline&&exactN<open.length?" (אין חיבור לשירות המפות)":"")+"."; }
     if(open.some(s=>s.urgent)) msg+=" משלוחים דחופים בהתחלה.";
     if(lateN) msg+=" ⚠ "+lateN+" עצירות יגיעו אחרי השעה שביקשו – אפשר להזיז ידנית.";
     if(!startPt) msg+=" כדאי למלא נקודת יציאה – אז המסלול מתחיל ממנה.";
-    if(approx) msg+=" "+approx+" רק לפי העיר – מסומנות באדום, כדאי לבדוק אותן.";
-    if(lost.length) msg+=" "+lost.length+" לא נמצאו במפה והועברו לסוף – בדוק אותן.";
+    if(lost.length) msg+=" ⚠ "+lost.length+" כתובות לא אותרו (לא ברור איזה רחוב) – הן בסוף הרשימה ולא נכנסו לסידור. תקן אותן ולחץ שוב על סידור.";
     if(NOMI_SKIPPED) msg+=" "+NOMI_SKIPPED+" כתובות מוקמו בינתיים לפי רחוב (כדי לא לחכות). 'סדר מחדש' בעוד רגע ידייק עוד.";
     setStatus(msg);
     drawMap(true); if(state.driving) focusCur();
@@ -1992,8 +1991,8 @@ function stopRow(s,opts){
     const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
     if(spotText(s)) chips.append(el("span",{class:"chip"},icon("box"),el("span",{text:spotText(s)})));
     if(s.gq&&s.geo&&s.geo!=="none"){ const fx=s.gq.split(",")[0].trim(); if(gnorm(fx)!==gnorm(String(s.addr||"").split(",")[0])) chips.append(el("span",{class:"chip",title:"כך האפליקציה הבינה את הכתובת",text:"✎ "+fx})); }
-    if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה – הנקודה על הרחוב",text:"📍 לפי רחוב"}));
-    if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 לפי עיר בלבד"}));
+    if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה – הנקודה על הרחוב",text:"📍 הרחוב נמצא, בלי מספר בית"}));
+    if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"⚠ הרחוב לא זוהה – לחץ לתיקון"}));
     if(s.geo==="none") chips.append(el("span",{class:"chip warn",text:"⚠ לא נמצא במפה"}));
   } else if(s.failed) chips.append(el("span",{class:"chip fail",text:"לא נמסר"+(s.reason?": "+s.reason:"")}));
   else chips.append(el("span",{class:"chip ok",text:(isPick(s)?"נאסף":"נמסר")+(s.doneAt?" "+clock(s.doneAt):"")+(s.pod&&s.pod.where?" · "+s.pod.where:"")}));
@@ -2041,7 +2040,7 @@ function renderDriveHead(){
   if(s.urgent) chips.append(el("span",{class:"chip urgent",text:"דחוף"}));
   const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
   if(s.late) chips.append(el("span",{class:"chip late",text:"⚠ מאחר מהשעה שביקשו"}));
-  if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 מיקום לפי עיר בלבד"}));
+  if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"⚠ הרחוב לא זוהה – תקן את הכתובת"}));
   if(chips.childNodes.length) card.append(chips);
   const sp=spotText(s), cnt=s.pkgs>1?s.pkgs+" חבילות":"";
   if(sp||cnt||s.pkg) card.append(el("div",{class:"spot"+(near?" hot":"")},icon("box"),el("span",{text:[sp,cnt,s.pkg?"#"+s.pkg:""].filter(Boolean).join(" · ")})));
