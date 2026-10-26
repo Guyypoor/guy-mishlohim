@@ -670,7 +670,7 @@ function showWaPreview(items){
 /* ---------- map data & shortest route (runs on the phone) ---------- */
 let GEOP=null;
 function gnorm(t){
-  return String(t||"").replace(/[\u0591-\u05C7]/g,"").replace(/["'׳״`.]/g,"").replace(/[-–־_/]/g," ")
+  return String(t||"").replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g," ").replace(/[\u0591-\u05C7]/g,"").replace(/["'׳״`.]/g,"").replace(/[-–־_/]/g," ")
     .replace(/קריית/g,"קרית").replace(/\s+/g," ").trim();
 }
 const CITY_ALIAS={"פרדס חנה כרכור":"פרדס חנה-כרכור","זכרון":"זכרון יעקב","אור עקיבה":"אור עקיבא","יוקנעם":"יקנעם עילית","יקנעם":"יקנעם עילית","קרית טבעון":"קריית טבעון","טבעון":"קריית טבעון","באקה":"באקה אל-גרביה","ג'סר":"ג'סר א-זרקא","גבעת עדה":"גבעת עדה","בנימינה גבעת עדה":"בנימינה","פרדס-חנה":"פרדס חנה"};
@@ -731,7 +731,7 @@ function gcLoad(){ if(GC) return GC; try{ GC=JSON.parse(localStorage.getItem(GC_
 function gcSave(){ try{ const k=Object.keys(GC); if(k.length>800) k.slice(0,k.length-800).forEach(x=>delete GC[x]); localStorage.setItem(GC_KEY,JSON.stringify(GC)); }catch(e){} }
 function splitAddr(text,defCity){
   const junk=/(^|\s)(דירה|דיר|קומה|כניסה|מיקוד|ד'|ק')(\s|\d|$).*$/;
-  const parts=String(text||"").split(",").map(x=>x.replace(junk,"").trim()).filter(x=>x&&!/^(דירה|קומה|כניסה)/.test(x));
+  const parts=String(text||"").replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g," ").replace(/[ \t]+/g," ").split(",").map(x=>x.replace(junk,"").trim()).filter(x=>x&&!/^(דירה|קומה|כניסה)/.test(x));
   let street=parts[0]||"", city=parts.length>1?parts[parts.length-1]:"";
   if(!city){ const m=street.match(/^(.*?\d+[א-ת]?)\s+([א-ת].*)$/); if(m){ street=m[1]; city=m[2]; } }
   if(!city) city=defCity||"";
@@ -753,10 +753,10 @@ async function nomi(params){
   }finally{ clearTimeout(t); }
 }
 let NOMI_LEFT=Infinity, NOMI_SKIPPED=0; // OpenStreetMap allows 1 lookup a second – big lists get a budget so nothing waits minutes
-async function preciseGeocode(G,text,defCity){
+async function preciseGeocode(G,text,defCity,force){
   const {street,city}=splitAddr(text,defCity); if(!street) return null;
   const key=gnorm(street+"|"+city); const C=gcLoad();
-  if(C[key]!==undefined) return C[key];
+  if(C[key]!==undefined&&!(force&&C[key]===null)) return C[key];
   if(gcOffline) return null;
   if(NOMI_LEFT<=0){ NOMI_SKIPPED++; return null; } NOMI_LEFT--;
   const hasNum=/\d/.test(street);
@@ -1037,11 +1037,11 @@ function recomputeEta(){ // after a delivery: shift the remaining ETAs from "now
   let t=Date.now();
   for(const s of state.stops){ if(s.done||s.leg==null) continue; t+=s.leg*1000; const a=secOfDay(s.after); if(a!=null&&t<dayMs(a)) t=dayMs(a); s.eta=t; t+=svcOf(s)*1000; }
 }
-async function locate(G,s,near){
+async function locate(G,s,near,force){
   const key=full(s), q=fixAddr(G,key,state.defCity);
-  if(s.lat!=null&&s.gk===key&&(s.geo==="house"||s.gq===q)) return {lat:s.lat,lon:s.lon,q:s.geo};
+  if(!force&&s.lat!=null&&s.gk===key&&(s.geo==="house"||s.gq===q)) return {lat:s.lat,lon:s.lon,q:s.geo};
   const loc=geocode(G,q,state.defCity,near);
-  let g=await preciseGeocode(G,q,state.defCity);
+  let g=await preciseGeocode(G,q,state.defCity,force);
   if(g&&g.q==="street"&&loc&&loc.q==="street") g=loc;
   if(!g) g=loc;
   s.geo=g?g.q:"none"; s.gk=key; s.gq=q; s.lat=g?g.lat:null; s.lon=g?g.lon:null;
@@ -1071,7 +1071,10 @@ async function orderGeo(){
       if(todo.length>3){ setStatus("מאתר "+todo.length+" כתובות במפה..."); await serverGeocode(G,todo,(d,t)=>setStatus("מאתר כתובות במפה ("+d+"/"+t+")...")); } }
     NOMI_LEFT=25; NOMI_SKIPPED=0;
     const located=[], lost=[]; let k=0;
-    for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g&&g.q!=="city") located.push(s); else lost.push(s); }   // only the town is known → a point in the middle of town would spoil the route: keep it out, at the end
+    for(const s of open){ k++; setStatus("מאתר כתובות במפה ("+k+"/"+open.length+")..."); const g=await locate(G,s,startPt); if(g&&g.q!=="city") located.push(s); else lost.push(s); }
+    // second chance for the ones not found: they get their own lookups even if the quick budget ran out
+    if(lost.length){ NOMI_LEFT=Math.max(0,NOMI_LEFT)+Math.min(30,lost.length*3); let j=0;
+      for(const s of lost.slice()){ j++; setStatus("בודק שוב כתובות שלא נמצאו ("+j+"/"+lost.length+")..."); const g=await locate(G,s,startPt,true); if(g&&g.q!=="city"){ lost.splice(lost.indexOf(s),1); located.push(s); } } }   // only the town is known → a point in the middle of town would spoil the route: keep it out, at the end
     setStatus("מחשב את המסלול הקצר ביותר לפי כבישים...");
     // same point (same street) → one stop group, by house number
     const groups=new Map();
