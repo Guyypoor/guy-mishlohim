@@ -780,6 +780,24 @@ async function preciseGeocode(G,text,defCity){
       }
       if(res&&res.q==="house") break;
     }
+    // the map may spell the street a bit differently ("צלילי תרועה" vs the official "צלצלי תרועה"):
+    // look up one word of the name in the town and accept a street that sounds the same, then ask again with the map's spelling
+    if(!res&&city){
+      const nm=street.replace(/\d+\s*[א-ת]?(?![א-ת])/g," ").replace(/\s+/g," ").trim(), num=(street.match(/\d+\s*[א-ת]?(?![א-ת])/g)||[]).pop()||"";
+      const ws=nm.split(" ").filter(w=>gnorm(w).length>=4).sort((a,b)=>b.length-a.length), want=stSound(nm);
+      if(ws.length>=2&&want.length>=4) for(const w of ws.slice(0,2)){
+        const arr=await nomi("q="+encodeURIComponent(w+", "+(oc||city)));
+        let hit=null;
+        for(const x of arr||[]){ const nx=String(x.name||(x.address&&x.address.road)||""); const lat=+x.lat, lon=+x.lon;
+          if(!nx||!isFinite(lat)||!cityOk(G,city,lat,lon,x.address)) continue;
+          if(lev(stSound(nx),want,1)<=1){ hit={nx,lat,lon}; break; } }
+        if(!hit) continue;
+        res={lat:hit.lat,lon:hit.lon,q:"street"};
+        if(hasNum&&num){ const arr2=await nomi("street="+encodeURIComponent(hit.nx+" "+num.replace(/\s+/g,""))+"&city="+encodeURIComponent(oc||city));
+          for(const x of arr2||[]){ const lat=+x.lat, lon=+x.lon; if(!isFinite(lat)||!cityOk(G,city,lat,lon,x.address)) continue; if(x.address&&x.address.house_number){ res={lat,lon,q:"house"}; break; } } }
+        break;
+      }
+    }
   }catch(e){ gcOffline=true; return null; }
   C[key]=res; gcSave(); return res;
 }
