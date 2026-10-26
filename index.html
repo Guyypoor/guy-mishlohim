@@ -784,6 +784,61 @@ async function preciseGeocode(G,text,defCity){
   C[key]=res; gcSave(); return res;
 }
 
+
+/* ---------- street names written differently ----------
+   "סמטת דיה 5" / "סמטת הדיה 5" / "רח' הדייה 5" are all the street the map calls "הדיה".
+   Match by the core of the name (no סמטת/רחוב/שדרות…, no leading ה, יי=י, וו=ו), only among the streets
+   of that town; if nothing matches, allow one wrong letter when exactly one street in the town is that close.
+   Corrections the courier makes by hand are remembered on the phone and used next time automatically. */
+const ST_PREFIX=/^(סמטת|סימטת|סמט|סמ|רחוב|רח|שדרות|שדרת|שד|דרך|כיכר|ככר|משעול|שביל|מעלה|מעלות|נתיב|שכונת|שכ)\s+/;
+function stCore(n){
+  let t=gnorm(n).replace(/\d+[א-ת]?/g," ").replace(/\s+/g," ").trim(), p;
+  while((p=t.replace(ST_PREFIX,""))!==t) t=p;
+  return t.split(" ").map(w=>w.length>2&&w[0]==="ה"?w.slice(1):w).join("").replace(/יי+/g,"י").replace(/וו+/g,"ו");
+}
+const CITY_ST=new Map();
+function cityStreets(G,city){ // streets of a town (and its twin towns), by core name
+  const grp=groupOf(city.name), gk=grp.join("|");
+  if(CITY_ST.has(gk)) return CITY_ST.get(gk);
+  const byCore=new Map(), keys=new Set();
+  for(const [k,pts] of G.st){
+    if(!pts.some(([lat,lon])=>{ const o=ownerOf(G,{lat,lon}); return o&&grp.includes(o.name); })) continue;
+    keys.add(k); const c=stCore(k); if(!c) continue; if(!byCore.has(c)) byCore.set(c,[]); byCore.get(c).push(k);
+  }
+  const r={byCore,keys,cores:[...byCore.keys()]}; CITY_ST.set(gk,r); return r;
+}
+const ALIAS_KEY="courier-street-alias";
+function aliasLoad(){ try{ return JSON.parse(localStorage.getItem(ALIAS_KEY)||"{}"); }catch(e){ return {}; } }
+function learnStreet(oldText,newText){ // the courier fixed an address by hand → remember "old street name in this town" = "new one"
+  try{
+    const a=splitAddr(oldText,state.defCity), b=splitAddr(newText,state.defCity);
+    const on=a.street.replace(/\d+[א-ת]?/g,"").trim(), nn=b.street.replace(/\d+[א-ת]?/g,"").trim();
+    if(!on||!nn||stCore(on)===stCore(nn)||gnorm(a.city)!==gnorm(b.city)) return;
+    const m=aliasLoad(); m[stCore(on)+"|"+gnorm(a.city)]=nn; const k=Object.keys(m); if(k.length>500) delete m[k[0]];
+    localStorage.setItem(ALIAS_KEY,JSON.stringify(m));
+  }catch(e){}
+}
+function resolveStreet(G,name,cityText){
+  const c=stCore(name); if(!c) return null;
+  const al=aliasLoad()[c+"|"+gnorm(cityText)]; if(al) return al;
+  const city=findCity(G,cityText); if(!city) return null;
+  const cs=cityStreets(G,city), k=gnorm(name);
+  if(cs.keys.has(k)) return null;                       // already the map's name in this town
+  let hit=cs.byCore.get(c);
+  if(!hit&&c.length>=4){ const f=nearest(c,cs.cores,1); if(f) hit=cs.byCore.get(f); }
+  return hit&&hit.length?G.disp.get(hit[0]):null;
+}
+function fixAddr(G,text,defCity){ // full address with the street name as the map knows it (or the same text)
+  if(!G||!text) return text;
+  try{
+    const {street,city}=splitAddr(text,defCity); if(!street) return text;
+    const num=(street.match(/\d+\s*[א-ת]?(?![א-ת])/)||[""])[0].replace(/\s+/g,"");
+    const name=street.replace(/\d+\s*[א-ת]?(?![א-ת])/,"").replace(/\s+/g," ").trim();
+    const r=resolveStreet(G,name,city); if(!r) return text;
+    return r+(num?" "+num:"")+(city?", "+city:"");
+  }catch(e){ return text; }
+}
+
 /* ---------- shortest route: real road matrix + exact / heuristic solver ---------- */
 const ROUTERS=["https://router.project-osrm.org","https://routing.openstreetmap.de/routed-car"];
 let SVC=180; // default seconds at each stop (setting)
@@ -906,13 +961,13 @@ function recomputeEta(){ // after a delivery: shift the remaining ETAs from "now
   for(const s of state.stops){ if(s.done||s.leg==null) continue; t+=s.leg*1000; const a=secOfDay(s.after); if(a!=null&&t<dayMs(a)) t=dayMs(a); s.eta=t; t+=svcOf(s)*1000; }
 }
 async function locate(G,s,near){
-  const key=full(s);
-  if(s.lat!=null&&s.gk===key) return {lat:s.lat,lon:s.lon,q:s.geo};
-  const loc=geocode(G,key,state.defCity,near);
-  let g=await preciseGeocode(G,key,state.defCity);
+  const key=full(s), q=fixAddr(G,key,state.defCity);
+  if(s.lat!=null&&s.gk===key&&(s.geo==="house"||s.gq===q)) return {lat:s.lat,lon:s.lon,q:s.geo};
+  const loc=geocode(G,q,state.defCity,near);
+  let g=await preciseGeocode(G,q,state.defCity);
   if(g&&g.q==="street"&&loc&&loc.q==="street") g=loc;
   if(!g) g=loc;
-  s.geo=g?g.q:"none"; s.gk=key; s.lat=g?g.lat:null; s.lon=g?g.lon:null;
+  s.geo=g?g.q:"none"; s.gk=key; s.gq=q; s.lat=g?g.lat:null; s.lon=g?g.lon:null;
   return g;
 }
 async function placeOf(G,text){
@@ -934,7 +989,7 @@ async function orderGeo(){
     const routeStart=(state.driving&&MY)?{lat:MY.lat,lon:MY.lon}:state.startLL;
     // many new addresses: look them all up at once through the server (seconds instead of minutes)
     { const C0=gcLoad(), seenK=new Set(), todo=[];
-      for(const s of open){ if(s.lat!=null&&s.gk===full(s)) continue; const sp=splitAddr(full(s),state.defCity); if(!sp.street) continue; const key=gnorm(sp.street+"|"+sp.city); if(C0[key]!==undefined||seenK.has(key)) continue; seenK.add(key); todo.push({key,q:sp.street+(sp.city?", "+sp.city:""),street:sp.street,city:sp.city}); }
+      for(const s of open){ const fq=fixAddr(G,full(s),state.defCity); if(s.lat!=null&&s.gk===full(s)&&(s.geo==="house"||s.gq===fq)) continue; const sp=splitAddr(fq,state.defCity); if(!sp.street) continue; const key=gnorm(sp.street+"|"+sp.city); if(C0[key]!==undefined||seenK.has(key)) continue; seenK.add(key); todo.push({key,q:sp.street+(sp.city?", "+sp.city:""),street:sp.street,city:sp.city}); }
       if(todo.length>3){ setStatus("מאתר "+todo.length+" כתובות במפה..."); await serverGeocode(G,todo,(d,t)=>setStatus("מאתר כתובות במפה ("+d+"/"+t+")...")); } }
     NOMI_LEFT=25; NOMI_SKIPPED=0;
     const located=[], lost=[]; let k=0;
@@ -1801,11 +1856,11 @@ function openStop(s){
   const scanB=("BarcodeDetector" in window)?el("button",{class:"iconbtn",type:"button","aria-label":"סרוק ברקוד",onclick:async()=>{ const c=await scanCode(); if(c) iPkg.value=c; else if(c==="") toast("לא זוהה ברקוד בצילום."); }},icon("scan")):null;
   const saveB=el("button",{class:"btn primary big block",type:"button",onclick:()=>{
     if(!iA.value.trim()){ iA.focus(); return; }
-    const oldKey=full(s), oldT=[s.urgent,s.last,s.after,s.before,s.svc].join("|");
+    const oldKey=full(s), oldGeo=s.geo, oldT=[s.urgent,s.last,s.after,s.before,s.svc].join("|");
     Object.assign(s,{addr:iA.value.trim(),city:iC.value.trim(),name:iN.value.trim(),phone:iP.value.trim(),note:iNo.value.trim(),pkg:iPkg.value.trim(),pkgs:iCnt.value?Math.max(1,+iCnt.value):"",
       after:iAf.value||"",before:iBf.value||"",svc:iSv.value===""?null:Math.max(0,+iSv.value),type:type.get(),urgent:prio.get()==="first",last:prio.get()==="last"});
     const spot={z:sz.get(),sd:ss.get(),h:sh.get()}; s.spot=(spot.z||spot.sd||spot.h)?spot:null;
-    const moved=full(s)!==oldKey; if(moved){ s.geo=undefined; s.lat=null; s.lon=null; s.eta=null; }
+    const moved=full(s)!==oldKey; if(moved){ if(oldGeo!=="house") learnStreet(oldKey,full(s)); s.geo=undefined; s.lat=null; s.lon=null; s.eta=null; }
     if(moved||oldT!==[s.urgent,s.last,s.after,s.before,s.svc].join("|")) state.dirty=true;
     cloudPatch(s,Object.assign({addr:s.addr,city:s.city,cust_name:s.name,note:s.note,urgent:!!s.urgent,after_t:s.after,before_t:s.before,lat:s.lat??null,lon:s.lon??null},extraCols(s)));
     save(); closeSheets(); render(); if(moved) locateOne(s); else drawMap(false); toast("נשמר");
