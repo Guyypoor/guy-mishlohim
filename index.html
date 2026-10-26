@@ -790,11 +790,64 @@ async function preciseGeocode(G,text,defCity){
    Match by the core of the name (no סמטת/רחוב/שדרות…, no leading ה, יי=י, וו=ו), only among the streets
    of that town; if nothing matches, allow one wrong letter when exactly one street in the town is that close.
    Corrections the courier makes by hand are remembered on the phone and used next time automatically. */
-const ST_PREFIX=/^(סמטת|סימטת|סמט|סמ|רחוב|רח|שדרות|שדרת|שד|דרך|כיכר|ככר|משעול|שביל|מעלה|מעלות|נתיב|שכונת|שכ)\s+/;
-function stCore(n){
+const ST_PREFIX=/^(סמטת|סימטת|סמטה|סמט|סמ|סים|רחוב|רח|שדרות|שדרת|שד|דרך|כיכר|ככר|משעול|שביל|מעלה|מעלות|נתיב|שכונת|שכונה|שכ|שיכון|ש)\s+/;
+function stBare(n){ // name without "סמטת/רחוב/שד'…" and without house numbers
   let t=gnorm(n).replace(/\d+[א-ת]?/g," ").replace(/\s+/g," ").trim(), p;
-  while((p=t.replace(ST_PREFIX,""))!==t) t=p;
-  return t.split(" ").map(w=>w.length>2&&w[0]==="ה"?w.slice(1):w).join("").replace(/יי+/g,"י").replace(/וו+/g,"ו");
+  while((p=t.replace(ST_PREFIX,""))!==t&&p) t=p;
+  return t;
+}
+function stCore(n){
+  return stBare(n).split(" ").map(w=>w.length>2&&w[0]==="ה"?w.slice(1):w).join("").replace(/יי+/g,"י").replace(/וו+/g,"ו").replace(/(.{2,})[האע]$/,"$1");
+}
+/* how it sounds: names typed from English / by ear ("זלזלי טרו" = "צלצלי תרועה", "מחורא" = "מכורה", "מצלטים" = "מצילתיים") */
+const PH={"ח":"כ","ך":"כ","ק":"כ","ט":"ת","ש":"ס","ץ":"צ","ז":"צ","ף":"פ","ם":"מ","ן":"נ"};
+function stSound(n){ return stBare(n).replace(/[\s]/g,"").replace(/[אהעוי]/g,"").replace(/[חךקטשץזףםן]/g,c=>PH[c]); }
+/* the official street list of each town (Israel CBS, data.gov.il) – loaded once per town, kept 30 days on the phone */
+const OFF_KEY="courier-streets-v1"; let OFF=null; const OFF_IDX=new Map();
+function offLoad(){ if(OFF) return OFF; try{ OFF=JSON.parse(localStorage.getItem(OFF_KEY)||"{}"); }catch(e){ OFF={}; } return OFF; }
+const CBS_CITY={"פרדס חנה":"פרדס חנה-כרכור","כרכור":"פרדס חנה-כרכור","בנימינה":"בנימינה-גבעת עדה","גבעת עדה":"בנימינה-גבעת עדה","קדימה":"קדימה-צורן","צורן":"קדימה-צורן","דלית אל-כרמל":"דאלית אל-כרמל","גבעת אולגה":"חדרה","בית אליעזר":"חדרה","אולגה":"חדרה"};
+function cbsName(G,cityText){ const c=G&&findCity(G,cityText||""); const nm=(c?c.name:String(cityText||"")).trim(); return (CBS_CITY[nm]||nm).replace(/קריית/g,"קרית"); }
+async function ensureStreets(G,cities){
+  const O=offLoad(); const need=[...new Set(cities.map(c=>cbsName(G,c)).filter(Boolean))].filter(n=>!O[n]||Date.now()-O[n].t>30*864e5);
+  for(const nm of need){
+    try{
+      const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),9000);
+      const r=await fetch("https://data.gov.il/api/3/action/datastore_search?resource_id=9ad3862c-8391-4b2f-84a4-2d4c68625f4b&limit=3000&fields="+encodeURIComponent("שם_רחוב,סמל_רחוב")+"&filters="+encodeURIComponent(JSON.stringify({"שם_ישוב":nm})),{signal:ctl.signal}); clearTimeout(t);
+      const j=await r.json(); const recs=(j&&j.result&&j.result.records)||[];
+      O[nm]={t:Date.now(),s:[...new Set(recs.filter(x=>+x["סמל_רחוב"]<9000).map(x=>String(x["שם_רחוב"]).trim()).filter(Boolean))]};
+      OFF_IDX.delete(nm);
+    }catch(e){ break; }   // no internet / blocked – work with what we have
+  }
+  try{ localStorage.setItem(OFF_KEY,JSON.stringify(O)); }catch(e){}
+}
+function offExpand(n){ return String(n).replace(/^סמ\s+/,"סמטת ").replace(/^שד\s+/,"שדרות ").replace(/^שכ\s+/,"שכונת ").replace(/^ש\s+/,"שיכון ").replace(/\s+/g," ").trim(); }
+function offIndex(nm){
+  if(OFF_IDX.has(nm)) return OFF_IDX.get(nm);
+  const e=offLoad()[nm]; if(!e||!e.s||!e.s.length) return null;
+  const rows=e.s.map(n=>{ const x=offExpand(n); return {x,k:gnorm(n),kx:gnorm(x),c:stCore(x),p:stSound(x)}; });
+  OFF_IDX.set(nm,rows); return rows;
+}
+function townWords(G,cityText){ // words of the town's names, as they sound (to cut "פרדס חנה קרקור" out of a street)
+  const c=G&&findCity(G,cityText||""); const names=c?groupOf(c.name).concat([cbsName(G,cityText)]):[String(cityText||"")];
+  const set=new Set(); names.join(" ").replace(/[-–]/g," ").split(/\s+/).forEach(w=>{ const k=stSound(w); if(k.length>=3) set.add(k); }); return set;
+}
+function stripTown(G,name,cityText){
+  const w=name.split(/\s+/).filter(Boolean); if(w.length<2) return name;
+  const tw=townWords(G,cityText);
+  for(let i=1;i<w.length;i++){ const k=stSound(w[i]); if(k.length>=3&&tw.has(k)) return w.slice(0,i).join(" "); }
+  return name;
+}
+function uniqueBy(rows,f){ const h=rows.filter(f); const xs=[...new Set(h.map(r=>r.x))]; return xs.length===1?xs[0]:null; }
+function resolveOfficial(G,name,cityText){
+  const rows=offIndex(cbsName(G,cityText)); if(!rows) return null;
+  const k=gnorm(name), c=stCore(name), p=stSound(name);
+  let r=rows.find(x=>x.k===k||x.kx===k); if(r) return r.x;
+  let x=uniqueBy(rows,o=>o.c===c); if(x) return x;
+  if(p.length>=3){ x=uniqueBy(rows,o=>o.p===p); if(x) return x; }
+  if(c.length>=4){ const f=nearest(c,[...new Set(rows.map(o=>o.c))],1); if(f){ x=uniqueBy(rows,o=>o.c===f); if(x) return x; } }
+  if(p.length>=4){ x=uniqueBy(rows,o=>o.p.startsWith(p)&&o.p.length<=p.length+4); if(x) return x; }   // cut short: "זלזלי טרו"
+  if(p.length>=4){ const f=nearest(p,[...new Set(rows.map(o=>o.p))],1); if(f){ x=uniqueBy(rows,o=>o.p===f); if(x) return x; } }
+  return null;
 }
 const CITY_ST=new Map();
 function cityStreets(G,city){ // streets of a town (and its twin towns), by core name
@@ -818,24 +871,30 @@ function learnStreet(oldText,newText){ // the courier fixed an address by hand �
     localStorage.setItem(ALIAS_KEY,JSON.stringify(m));
   }catch(e){}
 }
-function resolveStreet(G,name,cityText){
+function resolveStreet(G,name,cityText,strict){
   const c=stCore(name); if(!c) return null;
   const al=aliasLoad()[c+"|"+gnorm(cityText)]; if(al) return al;
   const city=findCity(G,cityText); if(!city) return null;
   const cs=cityStreets(G,city), k=gnorm(name);
   if(cs.keys.has(k)) return null;                       // already the map's name in this town
   let hit=cs.byCore.get(c);
-  if(!hit&&c.length>=4){ const f=nearest(c,cs.cores,1); if(f) hit=cs.byCore.get(f); }
+  if(!hit&&!strict&&c.length>=4){ const f=nearest(c,cs.cores,1); if(f) hit=cs.byCore.get(f); }
   return hit&&hit.length?G.disp.get(hit[0]):null;
 }
 function fixAddr(G,text,defCity){ // full address with the street name as the map knows it (or the same text)
   if(!G||!text) return text;
   try{
     const {street,city}=splitAddr(text,defCity); if(!street) return text;
-    const num=(street.match(/\d+\s*[א-ת]?(?![א-ת])/)||[""])[0].replace(/\s+/g,"");
-    const name=street.replace(/\d+\s*[א-ת]?(?![א-ת])/,"").replace(/\s+/g," ").trim();
-    const r=resolveStreet(G,name,city); if(!r) return text;
-    return r+(num?" "+num:"")+(city?", "+city:"");
+    const re=/\d+\s*[א-ת]?(?![א-ת])/g, all=[...street.matchAll(re)], last=all[all.length-1];
+    const num=last?last[0].replace(/\s+/g,""):"";
+    const name0=(last?street.slice(0,last.index)+" "+street.slice(last.index+last[0].length):street).replace(/[,]/g," ").replace(/\s+/g," ").trim();
+    const name=stripTown(G,name0,city);
+    const al=aliasLoad()[stCore(name)+"|"+gnorm(city)];
+    const off=al?null:resolveOfficial(G,name,city);
+    const base=al||off||name;
+    const r=resolveStreet(G,base,city,!!(al||off));
+    const out=r||al||off||(name!==name0?name:null); if(!out) return text;
+    return out+(num?" "+num:"")+(city?", "+city:"");
   }catch(e){ return text; }
 }
 
@@ -988,6 +1047,7 @@ async function orderGeo(){
     state.startLL=startPt?{lat:startPt.lat,lon:startPt.lon}:null; state.endLL=endPt?{lat:endPt.lat,lon:endPt.lon}:null;
     const routeStart=(state.driving&&MY)?{lat:MY.lat,lon:MY.lon}:state.startLL;
     // many new addresses: look them all up at once through the server (seconds instead of minutes)
+    await ensureStreets(G,open.map(s=>splitAddr(full(s),state.defCity).city).concat(state.defCity||[]));
     { const C0=gcLoad(), seenK=new Set(), todo=[];
       for(const s of open){ const fq=fixAddr(G,full(s),state.defCity); if(s.lat!=null&&s.gk===full(s)&&(s.geo==="house"||s.gq===fq)) continue; const sp=splitAddr(fq,state.defCity); if(!sp.street) continue; const key=gnorm(sp.street+"|"+sp.city); if(C0[key]!==undefined||seenK.has(key)) continue; seenK.add(key); todo.push({key,q:sp.street+(sp.city?", "+sp.city:""),street:sp.street,city:sp.city}); }
       if(todo.length>3){ setStatus("מאתר "+todo.length+" כתובות במפה..."); await serverGeocode(G,todo,(d,t)=>setStatus("מאתר כתובות במפה ("+d+"/"+t+")...")); } }
@@ -1891,7 +1951,7 @@ async function sharePod(s){
   copyText(text,$("#copyOut")); toast("הפרטים הועתקו");
 }
 async function locateOne(s){
-  try{ const G=await loadGeo(); if(!G) return; gcOffline=false; const startPt=state.startLL||null; await locate(G,s,startPt); save(); render(); drawMap(false);
+  try{ const G=await loadGeo(); if(!G) return; gcOffline=false; const startPt=state.startLL||null; await ensureStreets(G,[splitAddr(full(s),state.defCity).city]); await locate(G,s,startPt); save(); render(); drawMap(false);
     if(s.geo==="none") toast("לא מצאתי את “"+s.addr+"” במפה – בדוק את הכתובת","פרטים",()=>openStop(s),6000);
   }catch(e){}
 }
@@ -1913,6 +1973,7 @@ function stopRow(s,opts){
     if(isPick(s)) chips.append(el("span",{class:"chip"},icon("pickup"),el("span",{text:"איסוף"})));
     const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
     if(spotText(s)) chips.append(el("span",{class:"chip"},icon("box"),el("span",{text:spotText(s)})));
+    if(s.gq&&s.geo&&s.geo!=="none"){ const fx=s.gq.split(",")[0].trim(); if(gnorm(fx)!==gnorm(String(s.addr||"").split(",")[0])) chips.append(el("span",{class:"chip",title:"כך האפליקציה הבינה את הכתובת",text:"✎ "+fx})); }
     if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה – הנקודה על הרחוב",text:"📍 לפי רחוב"}));
     if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 לפי עיר בלבד"}));
     if(s.geo==="none") chips.append(el("span",{class:"chip warn",text:"⚠ לא נמצא במפה"}));
