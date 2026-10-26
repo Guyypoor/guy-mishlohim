@@ -784,8 +784,8 @@ async function preciseGeocode(G,text,defCity){
     // look up one word of the name in the town and accept a street that sounds the same, then ask again with the map's spelling
     if(!res&&city){
       const nm=street.replace(/\d+\s*[א-ת]?(?![א-ת])/g," ").replace(/\s+/g," ").trim(), num=(street.match(/\d+\s*[א-ת]?(?![א-ת])/g)||[]).pop()||"";
-      const ws=nm.split(" ").filter(w=>gnorm(w).length>=4).sort((a,b)=>b.length-a.length), want=stSound(nm);
-      if(ws.length>=2&&want.length>=4) for(const w of ws.slice(0,2)){
+      const ws=stBare(nm).split(" ").filter(w=>w.length>=3).sort((a,b)=>b.length-a.length), want=stSound(nm);
+      if(ws.length&&want.length>=3&&nm.split(" ").length>=2) for(const w of ws.slice(0,2)){
         const arr=await nomi("q="+encodeURIComponent(w+", "+(oc||city)));
         let hit=null;
         for(const x of arr||[]){ const nx=String(x.name||(x.address&&x.address.road)||""); const lat=+x.lat, lon=+x.lon;
