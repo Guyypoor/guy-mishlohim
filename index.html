@@ -957,11 +957,12 @@ async function orderGeo(){
     if(r.traffic) msg="המסלול המהיר ביותר עם תנועה בזמן אמת: כ־"+Math.round(r.meters/1000)+" ק״מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(r.delay>120?" (מתוכן כ־"+Math.round(r.delay/60)+" דקות בגלל עומסים)":"")+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+".";
     else if(r.mx.road) msg="המסלול הקצר ביותר לפי כבישים"+(r.exact&&open.length>1?" (נבדקו כל האפשרויות)":"")+": כ־"+Math.round(r.meters/1000)+" ק\"מ, כ־"+Math.round(r.drive/60)+" דקות נסיעה"+(state.endLL?" כולל הדרך לסיום":"")+". סיום משוער "+clock(dayMs(r.finish))+(r.wait>600?" (כולל המתנה לשעה שלקוח ביקש)":"")+".";
     else msg="אין חיבור לשרת הכבישים, לכן סודר לפי קו אווירי: כ־"+Math.round(r.meters/1000)+" ק\"מ משוער.";
-    msg+=" "+exactN+" מתוך "+open.length+" אותרו עד רמת הבית"+(gcOffline&&exactN<open.length?" (אין חיבור לשירות המפות – השאר לפי רחוב)":"")+".";
+    { const streetN=open.filter(s=>s.geo==="street").length;
+      msg+=" כל "+located.length+" הכתובות במסלול: "+exactN+" לפי מספר בית"+(streetN?", "+streetN+" לפי הרחוב (מספר הבית לא קיים במפה – הן ברחוב הנכון ומסודרות לפי מספר הבית)":"")+(gcOffline&&exactN<open.length?" (אין חיבור לשירות המפות)":"")+"."; }
     if(open.some(s=>s.urgent)) msg+=" משלוחים דחופים בהתחלה.";
     if(lateN) msg+=" ⚠ "+lateN+" עצירות יגיעו אחרי השעה שביקשו – אפשר להזיז ידנית.";
     if(!startPt) msg+=" כדאי למלא נקודת יציאה – אז המסלול מתחיל ממנה.";
-    if(approx) msg+=" "+approx+" אותרו רק לפי העיר (מסומנות).";
+    if(approx) msg+=" "+approx+" רק לפי העיר – מסומנות באדום, כדאי לבדוק אותן.";
     if(lost.length) msg+=" "+lost.length+" לא נמצאו במפה והועברו לסוף – בדוק אותן.";
     if(NOMI_SKIPPED) msg+=" "+NOMI_SKIPPED+" כתובות מוקמו בינתיים לפי רחוב (כדי לא לחכות). 'סדר מחדש' בעוד רגע ידייק עוד.";
     setStatus(msg);
@@ -1857,6 +1858,7 @@ function stopRow(s,opts){
     if(isPick(s)) chips.append(el("span",{class:"chip"},icon("pickup"),el("span",{text:"איסוף"})));
     const w=winText(s); if(w) chips.append(el("span",{class:"chip",text:w}));
     if(spotText(s)) chips.append(el("span",{class:"chip"},icon("box"),el("span",{text:spotText(s)})));
+    if(s.geo==="street") chips.append(el("span",{class:"chip",title:"מספר הבית לא קיים במפה – הנקודה על הרחוב",text:"📍 לפי רחוב"}));
     if(s.geo==="city") chips.append(el("span",{class:"chip warn",text:"📍 לפי עיר בלבד"}));
     if(s.geo==="none") chips.append(el("span",{class:"chip warn",text:"⚠ לא נמצא במפה"}));
   } else if(s.failed) chips.append(el("span",{class:"chip fail",text:"לא נמסר"+(s.reason?": "+s.reason:"")}));
