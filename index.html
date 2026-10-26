@@ -790,7 +790,7 @@ async function preciseGeocode(G,text,defCity){
         let hit=null;
         for(const x of arr||[]){ const nx=String(x.name||(x.address&&x.address.road)||""); const lat=+x.lat, lon=+x.lon;
           if(!nx||!isFinite(lat)||!cityOk(G,city,lat,lon,x.address)) continue;
-          if(lev(stSound(nx),want,1)<=1){ hit={nx,lat,lon}; break; } }
+          if(lev(stSound(nx),want,1)<=(want.length>=5?1:0)){ hit={nx,lat,lon}; break; } }
         if(!hit) continue;
         res={lat:hit.lat,lon:hit.lon,q:"street"};
         if(hasNum&&num){ const arr2=await nomi("street="+encodeURIComponent(hit.nx+" "+num.replace(/\s+/g,""))+"&city="+encodeURIComponent(oc||city));
