@@ -1449,7 +1449,9 @@ function curStop(){ return state.stops.find(s=>!s.done)||null; }
 function idxOf(s){ return state.stops.indexOf(s)+1; }
 function fmtDur(sec){ sec=Math.max(0,Math.round(sec/60)); if(sec<60) return sec+" דק'"; return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")+" שע'"; }
 function fmtKm(m){ return m<1000?Math.round(m/10)*10+" מ'":(m/1000).toFixed(m<10000?1:0)+" ק\"מ"; }
-function setStatus(t){ const s=$("#status"); if(s){ s.textContent=t||""; s.classList.remove("open"); } }
+let statusT=null;
+/* status line under the main button: short (2 lines max) and it clears itself after a few seconds so it never covers the list */
+function setStatus(t){ const s=$("#status"); if(!s) return; s.textContent=t||""; s.classList.remove("open"); clearTimeout(statusT); if(t) statusT=setTimeout(()=>{ if(s.textContent===t&&!s.classList.contains("open")) s.textContent=""; },10000); }
 function isPick(s){ return s&&s.type==="pickup"; }
 function spotText(s){ const p=s&&s.spot; if(!p) return ""; return [p.z,p.sd,p.h].filter(Boolean).join(" · "); }
 function spotFromStr(t){ const p=String(t||"").split("·").map(x=>x.trim()); const o={z:"",sd:"",h:""}; p.forEach(x=>{ if(["קדימה","אמצע","אחורה"].includes(x)) o.z=x; else if(["ימין","שמאל"].includes(x)) o.sd=x; else if(["רצפה","מדף"].includes(x)) o.h=x; }); return (o.z||o.sd||o.h)?o:null; }
@@ -2048,7 +2050,7 @@ function snap(name,noAnim){
   for(const n of [$("#grab"),$("#sheetHead")]){ n.addEventListener("pointerdown",start); n.addEventListener("pointermove",mv); n.addEventListener("pointerup",end); n.addEventListener("pointercancel",end); }
   $("#grab").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); snap(snapName==="full"?"half":"full"); } });
   addEventListener("resize",()=>snap(snapName,true));
-  $("#status").addEventListener("click",e=>{ e.stopPropagation(); e.currentTarget.classList.toggle("open"); });
+  $("#status").addEventListener("click",e=>{ e.stopPropagation(); const st=e.currentTarget; st.classList.toggle("open"); if(!st.classList.contains("open")){ clearTimeout(statusT); statusT=setTimeout(()=>{ if(!st.classList.contains("open")) st.textContent=""; },4000); } });
   /* the head can grow/shrink (status text, drive mode…) – keep the list exactly filling the rest, so its end is always reachable */
   if(window.ResizeObserver){ let hh0=0; new ResizeObserver(()=>{ const hh=headH(); if(hh!==hh0){ hh0=hh; if(!DRAG) snap(snapName,true); } }).observe($("#sheetHead")); }
   let lastY=0; $("#sheetBody").addEventListener("scroll",e=>{ const t=e.target.scrollTop; if(snapName==="half"&&t>lastY+30) snap("full"); lastY=t; },{passive:true});
