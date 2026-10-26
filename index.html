@@ -100,6 +100,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 .mainact{display:flex;gap:8px}
 .status{font-size:.88rem;color:var(--muted);margin:8px 0 0;min-height:0}
 .status:empty{display:none}
+/* long status messages must not eat the list: 2 lines, tap to read all */
+.status{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;cursor:pointer;line-height:1.35}
+.status.open{display:block;-webkit-line-clamp:unset;line-clamp:unset}
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;min-height:46px;padding:10px 16px;font:700 1rem var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;color:var(--ink);background:var(--surface-2)}
 .btn.block{flex:1;width:100%}
@@ -121,6 +124,9 @@ ol.stops{list-style:none;margin:0;padding:0}
 .stop:last-child{border-bottom:0}
 .stop.dragging{z-index:3;box-shadow:var(--shadow);border-radius:12px;padding-inline:8px;margin-inline:-8px}
 .stop.shift{transition:transform .15s}
+.stop{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.stop.dragging{transition:none;background:var(--surface-2)}
+html.reordering,html.reordering *{cursor:grabbing!important}
 .num{width:34px;height:34px;border-radius:50%;background:var(--sign);color:var(--sign-ink);display:grid;place-items:center;font:800 .95rem var(--font-display);font-variant-numeric:tabular-nums;flex:none;margin-top:2px}
 .stop.next .num{background:var(--amber);color:var(--amber-ink)}
 .stop.pick .num{border-radius:9px}
@@ -1443,7 +1449,7 @@ function curStop(){ return state.stops.find(s=>!s.done)||null; }
 function idxOf(s){ return state.stops.indexOf(s)+1; }
 function fmtDur(sec){ sec=Math.max(0,Math.round(sec/60)); if(sec<60) return sec+" דק'"; return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")+" שע'"; }
 function fmtKm(m){ return m<1000?Math.round(m/10)*10+" מ'":(m/1000).toFixed(m<10000?1:0)+" ק\"מ"; }
-function setStatus(t){ const s=$("#status"); if(s) s.textContent=t||""; }
+function setStatus(t){ const s=$("#status"); if(s){ s.textContent=t||""; s.classList.remove("open"); } }
 function isPick(s){ return s&&s.type==="pickup"; }
 function spotText(s){ const p=s&&s.spot; if(!p) return ""; return [p.z,p.sd,p.h].filter(Boolean).join(" · "); }
 function spotFromStr(t){ const p=String(t||"").split("·").map(x=>x.trim()); const o={z:"",sd:"",h:""}; p.forEach(x=>{ if(["קדימה","אמצע","אחורה"].includes(x)) o.z=x; else if(["ימין","שמאל"].includes(x)) o.sd=x; else if(["רצפה","מדף"].includes(x)) o.h=x; }); return (o.z||o.sd||o.h)?o:null; }
@@ -1855,7 +1861,8 @@ function stopRow(s,opts){
   else chips.append(el("span",{class:"chip ok",text:(isPick(s)?"נאסף":"נמסר")+(s.doneAt?" "+clock(s.doneAt):"")+(s.pod&&s.pod.where?" · "+s.pod.where:"")}));
   li.append(el("div",{class:"sbody"},el("div",{class:"saddr",text:s.addr}),sub?el("div",{class:"ssub",text:sub}):null,chips.childNodes.length?chips:null));
   if(!s.done&&opts&&opts.drag){ const g=el("button",{class:"grip",type:"button","aria-label":"גרור כדי לשנות את הסדר"},icon("grip")); g.addEventListener("pointerdown",e=>gripDown(e,li)); g.addEventListener("click",e=>e.stopPropagation()); li.append(g); }
-  li.addEventListener("click",()=>openStop(s));
+  if(!s.done&&opts&&opts.drag) longPressDrag(li);
+  li.addEventListener("click",()=>{ if(Date.now()-dragClickBlock<400) return; openStop(s); });
   return li;
 }
 function renderPlanHead(){
@@ -1942,27 +1949,77 @@ function render(){
   drawMap(false);
 }
 
-/* ---------- drag to reorder ---------- */
+/* ---------- drag to reorder ----------
+   Two ways to start: the grip handle (immediate), or a long press anywhere on the row (like Circuit).
+   While dragging near the top/bottom edge of the list it auto-scrolls, so an address can be moved
+   anywhere in a long route, not only within the rows that fit on screen. */
+let DRAG=null, dragClickBlock=0;
 function gripDown(e,li){
   e.preventDefault(); e.stopPropagation();
-  const list=$("#stops"); const items=[...list.children].filter(x=>x.dataset&&x.dataset.id);
-  const from=items.indexOf(li); if(from<0) return;
-  const h=li.getBoundingClientRect().height; const y0=e.clientY; let to=from;
-  const g=e.currentTarget; try{ g.setPointerCapture(e.pointerId); }catch(_){}
-  li.classList.add("dragging"); items.forEach(x=>{ if(x!==li) x.classList.add("shift"); });
-  const move=ev=>{ const dy=ev.clientY-y0; li.style.transform="translateY("+dy+"px)"; to=Math.max(0,Math.min(items.length-1,from+Math.round(dy/h)));
-    items.forEach((x,k)=>{ if(x===li) return; let sh=0; if(from<to&&k>from&&k<=to) sh=-h; if(from>to&&k<from&&k>=to) sh=h; x.style.transform=sh?"translateY("+sh+"px)":""; }); };
-  const up=()=>{ g.removeEventListener("pointermove",move); g.removeEventListener("pointerup",up); g.removeEventListener("pointercancel",up);
-    items.forEach(x=>{ x.style.transform=""; x.classList.remove("shift","dragging"); });
-    if(to===from) return;
-    const ids=items.map(x=>x.dataset.id); const [m]=ids.splice(from,1); ids.splice(to,0,m);
-    const byId=new Map(state.stops.map(s=>[s.id,s])); const vis=ids.map(id=>byId.get(id));
-    const head=state.driving?[curStop()].filter(Boolean):[];
-    state.stops=[...head,...vis,...state.stops.filter(s=>s.done)];
-    retime(true); try{ navigator.vibrate&&navigator.vibrate(15); }catch(_){}
-  };
-  g.addEventListener("pointermove",move); g.addEventListener("pointerup",up); g.addEventListener("pointercancel",up);
+  startDrag(li,e.pointerId,e.clientY,e.currentTarget);
 }
+function startDrag(li,pid,y,capEl){
+  if(DRAG) return;
+  const list=$("#stops"), body=$("#sheetBody"); const items=[...list.children].filter(x=>x.dataset&&x.dataset.id);
+  const from=items.indexOf(li); if(from<0) return;
+  const h=li.getBoundingClientRect().height;
+  const lt=list.getBoundingClientRect().top;
+  const mids=items.map(x=>{ const r=x.getBoundingClientRect(); return r.top-lt+r.height/2; }); // list coordinates, before any shift
+  const d={li,items,from,to:from,h,mids,y0:y,y,s0:body.scrollTop,body,raf:0,laid:false};
+  DRAG=d;
+  try{ capEl.setPointerCapture(pid); }catch(_){}
+  li.classList.add("dragging"); items.forEach(x=>{ if(x!==li) x.classList.add("shift"); });
+  document.documentElement.classList.add("reordering");
+  try{ navigator.vibrate&&navigator.vibrate(12); }catch(_){}
+  const move=ev=>{ if(ev.pointerId!==pid) return; d.y=ev.clientY; layoutDrag(); };
+  const up=ev=>{ if(ev.pointerId!==pid) return; capEl.removeEventListener("pointermove",move); capEl.removeEventListener("pointerup",up); capEl.removeEventListener("pointercancel",up); endDrag(); };
+  capEl.addEventListener("pointermove",move); capEl.addEventListener("pointerup",up); capEl.addEventListener("pointercancel",up);
+  const tick=()=>{ if(DRAG!==d) return;
+    const r=body.getBoundingClientRect(), zone=Math.min(80,r.height/4); let v=0;
+    if(d.y<r.top+zone) v=-Math.ceil(20*Math.min(1,(r.top+zone-d.y)/zone));
+    else if(d.y>r.bottom-zone) v=Math.ceil(20*Math.min(1,(d.y-(r.bottom-zone))/zone));
+    if(v){ const before=body.scrollTop; body.scrollTop=before+v; if(body.scrollTop!==before) layoutDrag(); }
+    d.raf=requestAnimationFrame(tick); };
+  d.raf=requestAnimationFrame(tick);
+  layoutDrag();
+}
+function layoutDrag(){
+  const d=DRAG; if(!d) return;
+  const dy=(d.y-d.y0)+(d.body.scrollTop-d.s0);       // how far the row has travelled inside the list
+  d.li.style.transform="translateY("+dy+"px)";
+  const c=d.mids[d.from]+dy; let to=d.from;
+  if(dy>0){ while(to+1<d.items.length&&c>d.mids[to+1]) to++; }
+  else { while(to-1>=0&&c<d.mids[to-1]) to--; }
+  if(to===d.to&&d.laid) return; d.to=to; d.laid=true;
+  d.items.forEach((x,k)=>{ if(x===d.li) return; let sh=0; if(d.from<to&&k>d.from&&k<=to) sh=-d.h; if(d.from>to&&k<d.from&&k>=to) sh=d.h; x.style.transform=sh?"translateY("+sh+"px)":""; });
+}
+function endDrag(){
+  const d=DRAG; if(!d) return; DRAG=null; cancelAnimationFrame(d.raf);
+  document.documentElement.classList.remove("reordering");
+  dragClickBlock=Date.now();
+  d.items.forEach(x=>{ x.style.transform=""; x.classList.remove("shift","dragging"); });
+  if(d.to===d.from) return;
+  const ids=d.items.map(x=>x.dataset.id); const [m]=ids.splice(d.from,1); ids.splice(d.to,0,m);
+  const byId=new Map(state.stops.map(s=>[s.id,s])); const vis=ids.map(id=>byId.get(id));
+  const head=state.driving?[curStop()].filter(Boolean):[];
+  state.stops=[...head,...vis,...state.stops.filter(s=>s.done)];
+  retime(true); try{ navigator.vibrate&&navigator.vibrate(15); }catch(_){}
+}
+/* long press on a row → start dragging it */
+function longPressDrag(li){
+  let t=null, sx=0, sy=0, pid=null;
+  const clear=()=>{ if(t){ clearTimeout(t); t=null; } };
+  li.addEventListener("pointerdown",e=>{
+    if(DRAG||e.button>0||e.target.closest(".grip,button,a,input")) return;
+    sx=e.clientX; sy=e.clientY; pid=e.pointerId; clear();
+    t=setTimeout(()=>{ t=null; startDrag(li,pid,sy,li); },420);
+  });
+  li.addEventListener("pointermove",e=>{ if(!t||e.pointerId!==pid) return; if(Math.hypot(e.clientX-sx,e.clientY-sy)>8) clear(); });
+  li.addEventListener("pointerup",clear); li.addEventListener("pointercancel",clear);
+  li.addEventListener("contextmenu",e=>{ if(t||DRAG) e.preventDefault(); });
+}
+/* while a row is being dragged, the finger must not scroll the list or the page */
+document.addEventListener("touchmove",e=>{ if(DRAG) e.preventDefault(); },{passive:false});
 
 /* ---------- bottom sheet ---------- */
 const SH=$("#sheet"); let snapName="half";
@@ -1981,7 +2038,7 @@ function snap(name,noAnim){
 }
 (function sheetDrag(){
   let y0=null,t0=0,base=0,H=0,moved=false;
-  const start=e=>{ if(e.target.closest("button,a,input,select,textarea")&&!e.target.closest("#grab")) return; y0=e.clientY; t0=Date.now(); H=sheetMax(); base=H-vis(snapName); moved=false; SH.classList.remove("anim"); try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
+  const start=e=>{ if(e.target.closest("#status")||(e.target.closest("button,a,input,select,textarea")&&!e.target.closest("#grab"))) return; y0=e.clientY; t0=Date.now(); H=sheetMax(); base=H-vis(snapName); moved=false; SH.classList.remove("anim"); try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
   const mv=e=>{ if(y0==null) return; const dy=e.clientY-y0; if(Math.abs(dy)>4) moved=true; const y=Math.max(0,Math.min(H-vis("peek"),base+dy)); SH.style.transform="translateY("+y+"px)"; };
   const end=e=>{ if(y0==null) return; const dy=e.clientY-y0, v=dy/Math.max(1,Date.now()-t0); y0=null;
     if(!moved){ if(e.currentTarget.id==="grab") snap(snapName==="full"?"half":(snapName==="half"?"full":"half")); else snap(snapName); return; }
@@ -1991,6 +2048,9 @@ function snap(name,noAnim){
   for(const n of [$("#grab"),$("#sheetHead")]){ n.addEventListener("pointerdown",start); n.addEventListener("pointermove",mv); n.addEventListener("pointerup",end); n.addEventListener("pointercancel",end); }
   $("#grab").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); snap(snapName==="full"?"half":"full"); } });
   addEventListener("resize",()=>snap(snapName,true));
+  $("#status").addEventListener("click",e=>{ e.stopPropagation(); e.currentTarget.classList.toggle("open"); });
+  /* the head can grow/shrink (status text, drive mode…) – keep the list exactly filling the rest, so its end is always reachable */
+  if(window.ResizeObserver){ let hh0=0; new ResizeObserver(()=>{ const hh=headH(); if(hh!==hh0){ hh0=hh; if(!DRAG) snap(snapName,true); } }).observe($("#sheetHead")); }
   let lastY=0; $("#sheetBody").addEventListener("scroll",e=>{ const t=e.target.scrollTop; if(snapName==="half"&&t>lastY+30) snap("full"); lastY=t; },{passive:true});
 })();
 

@@ -1,4 +1,4 @@
-const V="gm-v12";
+const V="gm-v13";
 const LOCAL=["./","index.html","classic.html","admin.html","cloud.js","files.js","shared.js","manifest.webmanifest","geo.json","icon-192.png","icon-512.png","apple-touch-icon.png"];
 const CACHE_HOSTS=[location.host,"cdnjs.cloudflare.com","cdn.jsdelivr.net","fonts.googleapis.com","fonts.gstatic.com"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(LOCAL)).then(()=>self.skipWaiting()));});
