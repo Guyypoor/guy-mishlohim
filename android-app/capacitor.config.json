@@ -1,0 +1,15 @@
+{
+  "appId": "il.guymishlohim.courier",
+  "appName": "מסלול שליח",
+  "webDir": "www",
+  "server": {
+    "url": "https://guyypoor.github.io/guy-mishlohim/",
+    "androidScheme": "https",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0B6B3A",
+    "useLegacyBridge": true
+  }
+}

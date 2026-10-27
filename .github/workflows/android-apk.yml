@@ -1,0 +1,111 @@
+name: Android APK (מסלול שליח)
+
+# The APK opens the live site, so ordinary app changes reach couriers without a new APK.
+# A new APK is built only when the Android wrapper itself changes (or on demand).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Install and sync
+        run: |
+          npm ci --no-audit --no-fund
+          npx cap sync android
+
+      - name: Unlock the signing key
+        id: key
+        env:
+          SIGNING_PASS: ${{ secrets.ANDROID_SIGNING_PASS }}
+        run: |
+          if [ -z "$SIGNING_PASS" ]; then
+            echo "::warning::Secret ANDROID_SIGNING_PASS is missing - building unsigned only (compile check), nothing is published."
+            echo "signed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in signing/release.p12.enc -out "$RUNNER_TEMP/release.p12" -pass env:SIGNING_PASS
+
+      - name: Build signed APK
+        working-directory: android-app/android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.key.outputs.signed == 'true' && format('{0}/release.p12', runner.temp) || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASS }}
+          ANDROID_KEY_ALIAS: courier
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: Verify signature
+        if: steps.key.outputs.signed == 'true'
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/cert.txt"
+          grep -q "15746863" <(tr -d ':' < "$RUNNER_TEMP/cert.txt" | tr 'a-f' 'A-F') || { echo "::error::APK not signed with the permanent key"; exit 1; }
+
+      - name: Publish to the apk branch
+        if: steps.key.outputs.signed == 'true'
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          OUT="$RUNNER_TEMP/out"; mkdir -p "$OUT"
+          cp "$APK" "$OUT/guy-mishlohim.apk"
+          printf 'version=1.0.%s\nbuild=%s\ncommit=%s\nbuilt=%s\nsha256=%s\n' \
+            "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$(date -u +%FT%TZ)" \
+            "$(sha256sum "$OUT/guy-mishlohim.apk" | cut -d' ' -f1)" > "$OUT/version.txt"
+          cd "$OUT"
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add . && git commit -qm "APK build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" apk
+          cat version.txt
+
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.signed == 'true'
+        with:
+          name: guy-mishlohim-apk
+          path: android-app/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Fail if the key was missing
+        if: steps.key.outputs.signed != 'true'
+        run: |
+          echo "::error::The app compiled, but no APK was published: add the ANDROID_SIGNING_PASS secret and re-run."
+          exit 1

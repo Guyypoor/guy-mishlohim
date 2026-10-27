@@ -1,0 +1,14 @@
+{
+  "name": "guy-mishlohim-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "אפליקציית אנדרואיד (APK) לשליחי גיא שליחויות – עוטפת את האתר החי",
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@capacitor-community/background-geolocation": "1.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}

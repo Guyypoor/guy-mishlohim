@@ -1225,9 +1225,10 @@ addEventListener("hashchange",importFromHash);
 /* ---------- install as an app ---------- */
 let deferredPrompt=null;
 const IS_IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
-function isInstalled(){ return !!(navigator.standalone||matchMedia("(display-mode: standalone)").matches||matchMedia("(display-mode: fullscreen)").matches||matchMedia("(display-mode: minimal-ui)").matches); }
+function isInstalled(){ return !!((window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())||navigator.standalone||matchMedia("(display-mode: standalone)").matches||matchMedia("(display-mode: fullscreen)").matches||matchMedia("(display-mode: minimal-ui)").matches); }
 addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); if(IS_IOS||isInstalled()) return; deferredPrompt=e; showInstall(); });
 function showInstall(){
+  if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()){ $("#installBanner").hidden=true; return; } // already the app
   const standalone=isInstalled();
   if(standalone){ $("#installBanner").hidden=true; return; }
   let closed=false; try{ closed=localStorage.getItem("courier-install-closed")==="1"; }catch(e){}
@@ -2461,6 +2462,21 @@ $("#copyWa").addEventListener("click",copyForWhatsApp);
 $("#clearExample").addEventListener("click",()=>{ state.stops=[]; state.example=false; save(); render(); setStatus("המסלול ריק. הוסף כתובות למעלה."); });
 /* ================= cloud (server) mode ================= */
 const C=window.Cloud; let ME=null, chan=null, pullTimer=null, geoWatch=null, lastSent=null, wakeLock=null;
+/* ---- APK (Android app): location keeps going with the screen off ---- */
+const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
+function nativePlugin(n){ try{ return Capacitor.registerPlugin?Capacitor.registerPlugin(n):(Capacitor.Plugins||{})[n]; }catch(e){ return null; } }
+const BGEO=NATIVE?nativePlugin("BackgroundGeolocation"):null, NHTTP=NATIVE?nativePlugin("CapacitorHttp"):null;
+let bgWatch=null;
+// Android slows down web requests from a backgrounded app after ~5 min, so in the APK positions go out through the phone's own HTTP.
+async function nativeRest(table,body,prefer){
+  if(!NHTTP) return false;
+  try{
+    const { data:{ session } }=await C.sb.auth.getSession(); if(!session) return false;
+    const r=await NHTTP.request({method:"POST",url:CLOUD_CFG.url+"/rest/v1/"+table,
+      headers:{apikey:CLOUD_CFG.anonKey,Authorization:"Bearer "+session.access_token,"Content-Type":"application/json",Prefer:prefer||"return=minimal"},data:body});
+    return r&&r.status>=200&&r.status<300;
+  }catch(e){ return false; }
+}
 function gate(html,bind){ $("#gate").hidden=false; $("#gateCard").innerHTML=html; if(bind) bind(); }
 function closeGate(){ $("#gate").hidden=true; }
 const LOGO='<img class="logo" src="icon-192.png" alt="">';
@@ -2605,9 +2621,18 @@ async function startShift(){
   const { data, error }=await C.sb.from("shifts").insert({courier:ME.id}).select("id").single();
   if(error){ setStatus(C.errText(error)); return; }
   state.shift={id:data.id,started:Date.now()}; save(); renderShift(); startWatch();
-  setStatus("המשמרת התחילה. המיקום נשלח למנהל רק בזמן שהאפליקציה פתוחה – השאר אותה פתוחה ככל האפשר.");
+  setStatus(BGEO?"המשמרת התחילה. המיקום נשלח למנהל גם כשהמסך כבוי, עד שתלחץ \"סיים משמרת\".":"המשמרת התחילה. המיקום נשלח למנהל רק בזמן שהאפליקציה פתוחה – השאר אותה פתוחה ככל האפשר.");
 }
 function startWatch(){
+  if(BGEO){
+    if(bgWatch!=null) return; bgWatch="pending";
+    BGEO.addWatcher({backgroundTitle:"משמרת פעילה – גיא שליחויות",backgroundMessage:"המיקום שלך נשלח למנהל עד סיום המשמרת.",requestPermissions:true,stale:false,distanceFilter:25},
+      (loc,err)=>{
+        if(err){ if(err.code==="NOT_AUTHORIZED"){ setStatus("לא אישרת גישה למיקום – המנהל לא יראה אותך על המפה."); if(confirm("כדי שהמנהל יראה אותך על המפה צריך לאשר מיקום \"כל הזמן\". לפתוח את ההגדרות?")) BGEO.openSettings(); } return; }
+        if(loc) onPos({coords:{latitude:loc.latitude,longitude:loc.longitude,accuracy:loc.accuracy,speed:loc.speed}});
+      }).then(id=>{ if(bgWatch==="pending") bgWatch=id; else BGEO.removeWatcher({id}); }).catch(()=>{ bgWatch=null; });
+    return;
+  }
   if(geoWatch!=null||!("geolocation" in navigator)) return;
   geoWatch=navigator.geolocation.watchPosition(onPos,err=>{ if(err.code===1) setStatus("לא אישרת גישה למיקום – המנהל לא יראה אותך על המפה. אפשר לאשר בהגדרות הדפדפן."); },{enableHighAccuracy:true,maximumAge:15000,timeout:30000});
   try{ navigator.wakeLock&&navigator.wakeLock.request("screen").then(l=>wakeLock=l).catch(()=>{}); }catch(e){}
@@ -2621,11 +2646,18 @@ async function onPos(p){
   if(lastSent&&now-lastSent.t<30000&&km(lastSent,c)<0.15) return;
   lastSent={...c,t:now};
   const iso=new Date().toISOString();
-  C.sb.from("positions").upsert({courier:ME.id,lat:c.lat,lon:c.lon,accuracy:p.coords.accuracy,speed:p.coords.speed,on_shift:true,updated_at:iso}).then(()=>{});
-  C.sb.from("track_points").insert({courier:ME.id,lat:c.lat,lon:c.lon}).then(()=>{});
+  const pos={courier:ME.id,lat:c.lat,lon:c.lon,accuracy:p.coords.accuracy,speed:p.coords.speed,on_shift:true,updated_at:iso}, pt={courier:ME.id,lat:c.lat,lon:c.lon};
+  if(NHTTP){
+    if(!(await nativeRest("positions",pos,"resolution=merge-duplicates,return=minimal"))) C.sb.from("positions").upsert(pos).then(()=>{});
+    if(!(await nativeRest("track_points",pt))) C.sb.from("track_points").insert(pt).then(()=>{});
+    return;
+  }
+  C.sb.from("positions").upsert(pos).then(()=>{});
+  C.sb.from("track_points").insert(pt).then(()=>{});
 }
 async function stopShift(silent){
   if(geoWatch!=null){ navigator.geolocation.clearWatch(geoWatch); geoWatch=null; }
+  if(BGEO&&bgWatch!=null){ const id=bgWatch; bgWatch=null; if(id!=="pending") try{ BGEO.removeWatcher({id}); }catch(e){} }
   try{ wakeLock&&wakeLock.release(); }catch(e){} wakeLock=null;
   if(state.shift&&ME){ try{ await C.sb.from("shifts").update({ended_at:new Date().toISOString()}).eq("id",state.shift.id); await C.sb.from("positions").update({on_shift:false,updated_at:new Date().toISOString()}).eq("courier",ME.id); }catch(e){} }
   state.shift=null; save(); renderShift(); if(!silent) setStatus("המשמרת הסתיימה. המיקום כבר לא נשלח.");
