@@ -75,7 +75,7 @@ public class FileChooserClient extends BridgeWebChromeClient {
             return true;
         } catch (ActivityNotFoundException | SecurityException e) {
             Log.w(TAG, "chooser failed", e);
-            finishPending(null);
+            pending = null; // hand the same callback to Capacitor's picker (must not be answered twice)
             return super.onShowFileChooser(webView, callback, params);
         }
     }
